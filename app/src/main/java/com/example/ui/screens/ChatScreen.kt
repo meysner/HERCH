@@ -107,7 +107,7 @@ fun ChatScreen(
         { text: String ->
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("message", text))
-            scope.launch { snackbarHostState.showSnackbar("Скопировано") }
+            scope.launch { snackbarHostState.showSnackbar("Copied") }
             Unit
         }
     }
@@ -385,7 +385,7 @@ fun ChatScreen(
 
     if (showWorkspaceSheet) {
         SelectionBottomSheet(
-            title = "Выберите workspace",
+            title = "Select workspace",
             items = availableWorkspaces,
             selectedItem = currentWorkspace,
             onItemSelected = { viewModel.setWorkspace(it) },
@@ -419,7 +419,7 @@ fun ChatScreen(
             }
         }
         ClarifyBottomSheet(
-            question = pendingClarify?.optString("question") ?: "Вопрос от агента",
+            question = pendingClarify?.optString("question") ?: "Question from agent",
             choices = choices,
             onRespond = { response -> viewModel.respondToClarify(response) },
             onDismiss = { /* ViewModel обработает */ }
@@ -439,7 +439,7 @@ fun ChatScreen(
         AlertDialog(
             onDismissRequest = { if (!isAddingWorkspace) showAddWorkspaceDialog = false },
             containerColor = Color(0xFF1E1E1E),
-            title = { Text("Добавить workspace", color = Color.White) },
+            title = { Text("Add workspace", color = Color.White) },
             text = {
                 Column {
                     OutlinedTextField(
@@ -455,7 +455,7 @@ fun ChatScreen(
                                 }
                             } else workspaceSuggestions = emptyList()
                         },
-                        label = { Text("Путь к директории") },
+                        label = { Text("Directory path") },
                         placeholder = { Text("/home/user/project") },
                         singleLine = true,
                         isError = addWorkspaceError.isNotBlank(),
@@ -509,9 +509,9 @@ fun ChatScreen(
                 TextButton(
                     onClick = {
                         val path = newWorkspacePath.trim()
-                        if (path.isBlank()) { addWorkspaceError = "Введите путь"; return@TextButton }
+                        if (path.isBlank()) { addWorkspaceError = "Enter path"; return@TextButton }
                         if (!path.startsWith("/") && !path.matches(Regex("^[A-Za-z]:\\\\.*"))) {
-                            addWorkspaceError = "Путь должен начинаться с / или буквы диска"
+                            addWorkspaceError = "Path must start with / or a drive letter"
                             return@TextButton
                         }
                         isAddingWorkspace = true
@@ -526,7 +526,7 @@ fun ChatScreen(
                     if (isAddingWorkspace) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color(0xFFFFD700))
                     } else {
-                        Text("Добавить", color = Color(0xFFFFD700))
+                        Text("Add", color = Color(0xFFFFD700))
                     }
                 }
             },
@@ -535,7 +535,7 @@ fun ChatScreen(
                     onClick = { if (!isAddingWorkspace) showAddWorkspaceDialog = false },
                     enabled = !isAddingWorkspace
                 ) {
-                    Text("Отмена", color = Color.Gray)
+                    Text("Cancel", color = Color.Gray)
                 }
             }
         )

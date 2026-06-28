@@ -366,7 +366,7 @@ class SessionViewModel(
                 availableWorkspaces = _apiClient.addWorkspace(path)
                 currentWorkspace = path
                 onSuccess()
-            }.onFailure { onError(it.message ?: "Ошибка добавления") }
+            }.onFailure { onError(it.message ?: "Error adding") }
         }
     }
 

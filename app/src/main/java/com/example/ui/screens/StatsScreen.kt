@@ -139,14 +139,14 @@ private fun OverviewCard(data: InsightsData) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Analytics, contentDescription = null, tint = Color(0xFFFFD700), modifier = Modifier.size(22.dp))
                 Spacer(modifier = Modifier.width(10.dp))
-                Text("Обзор", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text("Overview", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(modifier = Modifier.weight(1f))
                 Text("${data.periodDays}d", color = Color(0xFF666666), fontSize = 13.sp)
             }
             Spacer(modifier = Modifier.height(16.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                StatItem("Сессий", data.totalSessions.toString())
-                StatItem("Сообщений", data.totalMessages.toString())
+                StatItem("Sessions", data.totalSessions.toString())
+                StatItem("Messages", data.totalMessages.toString())
             }
         }
     }
@@ -172,16 +172,16 @@ private fun TokensCard(data: InsightsData) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Token, contentDescription = null, tint = Color(0xFFFFD700), modifier = Modifier.size(22.dp))
                 Spacer(modifier = Modifier.width(10.dp))
-                Text("Токены", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text("Tokens", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             }
             Spacer(modifier = Modifier.height(16.dp))
-            TokenRow("Вход", data.totalInputTokens, Color(0xFF4CAF50))
+            TokenRow("Input", data.totalInputTokens, Color(0xFF4CAF50))
             Spacer(modifier = Modifier.height(10.dp))
-            TokenRow("Выход", data.totalOutputTokens, Color(0xFF64B5F6))
+            TokenRow("Output", data.totalOutputTokens, Color(0xFF64B5F6))
             Spacer(modifier = Modifier.height(10.dp))
             HorizontalDivider(color = Color(0xFF2C2C2C))
             Spacer(modifier = Modifier.height(10.dp))
-            TokenRow("Всего", data.totalTokens, Color.White)
+            TokenRow("Total", data.totalTokens, Color.White)
         }
     }
 }
@@ -209,12 +209,12 @@ private fun ModelsCard(data: InsightsData) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.SmartToy, contentDescription = null, tint = Color(0xFFFFD700), modifier = Modifier.size(22.dp))
                 Spacer(modifier = Modifier.width(10.dp))
-                Text("Модели", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Text("Models", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
             }
             Spacer(modifier = Modifier.height(16.dp))
 
             if (data.models.isEmpty()) {
-                Text("Нет данных", color = Color(0xFF555555), fontSize = 14.sp)
+                Text("No data", color = Color(0xFF555555), fontSize = 14.sp)
             } else {
                 data.models.forEachIndexed { index, model ->
                     ModelRow(model)
@@ -267,7 +267,7 @@ private fun ModelRow(model: com.example.data.ModelStats) {
         }
         Spacer(modifier = Modifier.height(4.dp))
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("${model.sessions} сессий", color = Color(0xFF666666), fontSize = 12.sp)
+            Text("${model.sessions} sessions", color = Color(0xFF666666), fontSize = 12.sp)
             Text("in: ${formatTokens(model.inputTokens)}  out: ${formatTokens(model.outputTokens)}", color = Color(0xFF666666), fontSize = 12.sp)
         }
     }

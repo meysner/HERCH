@@ -252,8 +252,8 @@ fun AppMenuScreen(
                     }
                     Text(
                         text = when {
-                            isActive -> "Выполняется запрос…"
-                            isUnread -> "Новое сообщение"
+                            isActive -> "Request in progress..."
+                            isUnread -> "New message"
                             else -> sessionMeta(session)
                         },
                         color = if (isActive || isUnread) Color(0xFFFFD700).copy(alpha = 0.75f) else Color(0xFF888888),

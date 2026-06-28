@@ -49,11 +49,11 @@ fun ApprovalBottomSheet(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.WarningAmber, contentDescription = null, tint = Color(0xFFFFD700), modifier = Modifier.size(28.dp))
                 Spacer(modifier = Modifier.width(12.dp))
-                Text("Требуется подтверждение", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("Confirmation required", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                "Агент запрашивает разрешение на выполнение потенциально опасного действия.",
+                "The agent requests permission to perform a potentially dangerous action.",
                 color = Color(0xFFCCCCCC),
                 fontSize = 16.sp,
                 lineHeight = 22.sp
@@ -66,7 +66,7 @@ fun ApprovalBottomSheet(
                     modifier = Modifier.weight(1f).height(50.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Запретить", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text("Deny", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                 }
                 Button(
                     onClick = { responded = true; onRespond("once"); onDismiss() },
@@ -74,7 +74,7 @@ fun ApprovalBottomSheet(
                     modifier = Modifier.weight(1f).height(50.dp),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Разрешить", color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Allow", color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -97,7 +97,7 @@ fun ClarifyBottomSheet(
     ModalBottomSheet(
         onDismissRequest = {
             if (!responded) {
-                onRespond("Пользователь отказался отвечать")
+                onRespond("User refused to answer")
             }
             onDismiss()
         },
@@ -116,7 +116,7 @@ fun ClarifyBottomSheet(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.HelpOutline, contentDescription = null, tint = Color(0xFF64B5F6), modifier = Modifier.size(28.dp))
                 Spacer(modifier = Modifier.width(12.dp))
-                Text("Уточнение", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text("Clarification", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(modifier = Modifier.height(16.dp))
             Text(question, color = Color(0xFFCCCCCC), fontSize = 16.sp, lineHeight = 22.sp)
@@ -145,7 +145,7 @@ fun ClarifyBottomSheet(
                 }
                 Spacer(modifier = Modifier.height(20.dp))
                 Text(
-                    text = "Или введите свой ответ:",
+                    text = "Or enter your own answer:",
                     color = Color.Gray,
                     fontSize = 13.sp,
                     modifier = Modifier.padding(bottom = 8.dp)
@@ -155,7 +155,7 @@ fun ClarifyBottomSheet(
             OutlinedTextField(
                 value = answerText,
                 onValueChange = { answerText = it },
-                placeholder = { Text("Собственный вариант...") },
+                placeholder = { Text("Custom option...") },
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -181,7 +181,7 @@ fun ClarifyBottomSheet(
                 shape = RoundedCornerShape(12.dp)
             ) {
                 Text(
-                    "Ответить",
+                    "Answer",
                     color = if (answerText.isNotBlank()) Color.Black else Color.Gray,
                     fontWeight = FontWeight.Medium
                 )
@@ -232,7 +232,7 @@ fun SelectionBottomSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "По умолчанию",
+                    text = "Default",
                     color = if (selectedItem == null) Color(0xFFFFD700) else Color.White,
                     fontSize = 16.sp,
                     modifier = Modifier.weight(1f)
@@ -278,7 +278,7 @@ fun SelectionBottomSheet(
                 ) {
                     Icon(Icons.Outlined.Add, contentDescription = null, tint = Color(0xFFFFD700), modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text("Добавить workspace", color = Color(0xFFFFD700), fontSize = 16.sp)
+                    Text("Add workspace", color = Color(0xFFFFD700), fontSize = 16.sp)
                 }
             }
         }
@@ -307,7 +307,7 @@ fun ModelSelectionSheet(
                 .padding(bottom = 32.dp, top = 8.dp)
         ) {
             Text(
-                text = "Выберите модель",
+                text = "Select model",
                 color = Color.White,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
@@ -324,7 +324,7 @@ fun ModelSelectionSheet(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "По умолчанию",
+                    text = "Default",
                     color = if (selectedModel == null) Color(0xFFFFD700) else Color.White,
                     fontSize = 16.sp,
                     modifier = Modifier.weight(1f)

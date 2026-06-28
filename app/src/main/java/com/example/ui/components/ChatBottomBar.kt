@@ -156,7 +156,7 @@ fun ChatBottomBar(
                     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.TopStart) {
                         if (composerText.isEmpty()) {
                             Text(
-                                text = "Спросите что угодно... /commands",
+                                text = "Ask anything... /commands",
                                 color = Color(0xFF666666),
                                 fontSize = 17.sp,
                             )
@@ -200,7 +200,7 @@ fun ChatBottomBar(
                             modifier = Modifier.background(Color(0xFF2C2C2C)),
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Камера", color = Color.White) },
+                                text = { Text("Camera", color = Color.White) },
                                 leadingIcon = {
                                     Icon(Icons.Outlined.CameraAlt, null, tint = Color(0xFF888888))
                                 },
@@ -223,7 +223,7 @@ fun ChatBottomBar(
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text("Фото", color = Color.White) },
+                                text = { Text("Photo", color = Color.White) },
                                 leadingIcon = {
                                     Icon(Icons.Outlined.Image, null, tint = Color(0xFF888888))
                                 },
@@ -233,7 +233,7 @@ fun ChatBottomBar(
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text("Файл", color = Color.White) },
+                                text = { Text("File", color = Color.White) },
                                 leadingIcon = {
                                     Icon(Icons.Outlined.InsertDriveFile, null, tint = Color(0xFF888888))
                                 },

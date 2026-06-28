@@ -81,7 +81,7 @@ fun ReasoningBlock(previewText: String, fullText: String = previewText) {
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
-                    text = "Размышление",
+                    text = "Thinking",
                     color = Color.LightGray,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium

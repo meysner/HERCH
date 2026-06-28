@@ -142,7 +142,7 @@ fun MemoryScreen(
                         }
 
                         MemorySection(
-                            title = "Мои заметки",
+                            title = "My notes",
                             icon = Icons.Outlined.StickyNote2,
                             content = data?.memory ?: "",
                             mtime = data?.memoryMtime,
@@ -152,7 +152,7 @@ fun MemoryScreen(
                         )
 
                         MemorySection(
-                            title = "Профиль пользователя",
+                            title = "User profile",
                             icon = Icons.Outlined.PersonOutline,
                             content = data?.user ?: "",
                             mtime = data?.userMtime,
@@ -162,7 +162,7 @@ fun MemoryScreen(
                         )
 
                         MemorySection(
-                            title = "Душа агента",
+                            title = "Agent's soul",
                             icon = Icons.Outlined.Psychology,
                             content = data?.soul ?: "",
                             mtime = data?.soulMtime,
@@ -217,7 +217,7 @@ private fun MemorySection(
                     Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     val mtimeText = formatMtime(mtime)
                     if (mtimeText.isNotBlank()) {
-                        Text("Изменено: $mtimeText", color = Color(0xFF666666), fontSize = 12.sp)
+                        Text("Changed: $mtimeText", color = Color(0xFF666666), fontSize = 12.sp)
                     }
                 }
                 if (!editing) {
@@ -235,7 +235,7 @@ private fun MemorySection(
 
             if (!expanded) {
                 if (isEmpty) {
-                    Text("Пусто", color = Color(0xFF555555), fontSize = 14.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                    Text("Empty", color = Color(0xFF555555), fontSize = 14.sp, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
                 } else {
                     Text(
                         text = previewText,
@@ -259,7 +259,7 @@ private fun MemorySection(
                         decorationBox = { innerTextField ->
                             Box(modifier = Modifier.fillMaxWidth()) {
                                 if (editText.isEmpty()) {
-                                    Text("Введите текст...", color = Color(0xFF555555), fontSize = 14.sp)
+                                    Text("Enter text...", color = Color(0xFF555555), fontSize = 14.sp)
                                 }
                                 innerTextField()
                             }
@@ -285,7 +285,7 @@ private fun MemorySection(
                             },
                             enabled = !isSaving
                         ) {
-                            Text("Отмена", color = Color.Gray)
+                            Text("Cancel", color = Color.Gray)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
@@ -311,14 +311,14 @@ private fun MemorySection(
                             if (isSaving) {
                                 CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.Black)
                             } else {
-                                Text("Сохранить", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                Text("Save", fontSize = 14.sp, fontWeight = FontWeight.Medium)
                             }
                         }
                     }
                 } else {
                     if (isEmpty) {
                         Text(
-                            "Пусто",
+                            "Empty",
                             color = Color(0xFF555555),
                             fontSize = 14.sp,
                             fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
@@ -342,7 +342,7 @@ private fun MemorySection(
                         ) {
                             Icon(Icons.Outlined.Edit, contentDescription = null, tint = Color(0xFFFFD700), modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Редактировать", color = Color(0xFFFFD700), fontSize = 14.sp)
+                            Text("Edit", color = Color(0xFFFFD700), fontSize = 14.sp)
                         }
                     }
                 }
