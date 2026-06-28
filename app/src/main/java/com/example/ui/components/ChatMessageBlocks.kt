@@ -150,11 +150,14 @@ fun UserMessageBubble(
                 Column(modifier = Modifier.padding(12.dp, 10.dp)) {
                     msg.blocks.forEach { block ->
                         when (block.type) {
-                            ChatBlockType.TEXT -> Text(
-                                block.content,
-                                color = Color.White,
-                                fontSize = 16.sp,
-                                lineHeight = 24.sp
+                            ChatBlockType.TEXT -> MarkdownText(
+                                markdown = block.content,
+                                style = TextStyle(
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    lineHeight = 24.sp
+                                ),
+                                isTextSelectable = true
                             )
                             ChatBlockType.IMAGE -> block.imageUrl?.let { url ->
                                 val fullUrl = if (url.startsWith("/")) "$baseUrl$url" else url
@@ -201,12 +204,15 @@ fun AssistantMessageBubble(
     ) {
         msg.blocks.forEach { block ->
             when (block.type) {
-                ChatBlockType.TEXT -> Text(
-                    text = block.content,
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    lineHeight = 24.sp,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+                ChatBlockType.TEXT -> MarkdownText(
+                    markdown = block.content,
+                    style = TextStyle(
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        lineHeight = 24.sp
+                    ),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                    isTextSelectable = true
                 )
                 ChatBlockType.THINKING -> ReasoningBlock(
                     previewText = block.content.take(80).replace('\n', ' '),
