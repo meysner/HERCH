@@ -1,7 +1,9 @@
 # Hermes native Android client.
 <img src="images/logo.gif" width="350" alt="logo">
 An Android client for Hermes Web UI.
-Based on the Hermes Web UI by nesquena, inspired by Hermex, and built primarily for my own use. If you'd like to improve it, pull requests are always welcome.
+Based on the <a href="https://github.com/nesquena/hermes-webui">Hermes Web UI</a>
+by nesquena, inspired by
+<a href="https://hermexapp.com/">Hermex</a>, and built primarily for my own use. If you'd like to improve it, pull requests are always welcome.
 
 ## Features
 
