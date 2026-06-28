@@ -1,21 +1,49 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Hermes native Android client.
+<img src="images/logo.gif" width="350" alt="logo">
+An Android client for Hermes Web UI.
+Based on the <a href="https://github.com/nesquena/hermes-webui">Hermes Web UI</a>
+by nesquena, inspired by
+<a href="https://hermexapp.com/">Hermex</a>, and built primarily for my own use. If you'd like to improve it, pull requests are always welcome.
 
-# Run and deploy your AI Studio app
+## Features
 
-This contains everything you need to run your app locally.
+* Chat sessions
+* Messaging
+* Workspace file management
+* Simple and lightweight interface
 
-View your app in AI Studio: https://ai.studio/apps/04d1bf89-f57d-48a3-bb13-f0d971748e1b
+## Screenshots
+<p align="center">
+  <img src="images/1.jpg" width="300" alt="Screenshot 1">
+  <img src="images/2.jpg" width="300" alt="Screenshot 2">
+</p>
 
-## Run Locally
+## Getting Started
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+1. Download and install the APK.
+2. Set up Hermes Web UI and configure a password by following the official tutorial:
+   https://get-hermes.ai/setup/
+3. Expose your Hermes Web UI instance to the internet (for example, by forwarding the port or using a service such as Cloudflare Tunnel).
+4. Open the app and enter:
 
+   * Server URL
+   * Password
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+You're ready to go.
+
+## Building from Source
+
+You can build the project yourself using:
+
+```bash
+build.bat
+```
+
+## About the Project
+
+This app was built almost entirely using free AI tools—it's 100% vibe-coded. I'm not a Kotlin developer, so the code may not be perfect, but it works and I'm continuously improving it.
+
+## Requirements
+
+* **Minimum Android version:** Android 7.0 (Nougat)
+* **minSdk:** 24
