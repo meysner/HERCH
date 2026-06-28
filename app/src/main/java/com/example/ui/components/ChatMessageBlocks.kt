@@ -39,10 +39,14 @@ fun HeightCachingItem(
     cacheKey: String,
     heightCache: MutableMap<String, Int>,
     modifier: Modifier = Modifier,
+    // Если true — блок содержит раскрывающийся контент (tool/thinking).
+    // В этом случае НЕ применяем heightIn(min=…), иначе после схлопывания
+    // остаётся чёрное пустое пространство равное закэшированной высоте.
+    isExpandable: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current
-    val cachedPx = heightCache[cacheKey] ?: 0
+    val cachedPx = if (!isExpandable) (heightCache[cacheKey] ?: 0) else 0
 
     Box(
         modifier = modifier
@@ -202,38 +206,68 @@ fun AssistantMessageBubble(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        msg.blocks.forEach { block ->
+        val blockList = msg.blocks
+        var i = 0
+        while (i < blockList.size) {
+            val block = blockList[i]
             when (block.type) {
-                ChatBlockType.TEXT -> MarkdownText(
-                    markdown = block.content,
-                    style = TextStyle(
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        lineHeight = 24.sp
-                    ),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                    isTextSelectable = true
-                )
-                ChatBlockType.THINKING -> ReasoningBlock(
-                    previewText = block.content.take(80).replace('\n', ' '),
-                    fullText = block.content
-                )
-                ChatBlockType.TOOL_USE -> ToolCallBlock(
-                    toolName = block.toolName ?: "tool",
-                    input = block.content
-                )
-                ChatBlockType.TOOL_RESULT -> ToolResultBlock(result = block.content)
-                ChatBlockType.IMAGE -> block.imageUrl?.let { url ->
-                    val fullUrl = if (url.startsWith("/")) "$baseUrl$url" else url
-                    AsyncImage(
-                        model = fullUrl,
-                        contentDescription = "Generated image",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 4.dp, vertical = 4.dp)
-                            .clip(RoundedCornerShape(8.dp)),
-                        contentScale = ContentScale.FillWidth
+                ChatBlockType.TEXT -> {
+                    MarkdownText(
+                        markdown = block.content,
+                        style = TextStyle(
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            lineHeight = 24.sp
+                        ),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                        isTextSelectable = true
                     )
+                    i++
+                }
+                ChatBlockType.THINKING -> {
+                    ReasoningBlock(
+                        previewText = block.content.take(80).replace('\n', ' '),
+                        fullText = block.content
+                    )
+                    i++
+                }
+                ChatBlockType.TOOL_USE -> {
+                    val next = blockList.getOrNull(i + 1)
+                    if (next?.type == ChatBlockType.TOOL_RESULT) {
+                        ToolUseResultBlock(
+                            toolName = block.toolName ?: "tool",
+                            input = block.content,
+                            result = next.content
+                        )
+                        i += 2
+                    } else {
+                        // Результат ещё не пришёл (стриминг)
+                        ToolCallBlock(
+                            toolName = block.toolName ?: "tool",
+                            input = block.content
+                        )
+                        i++
+                    }
+                }
+                ChatBlockType.TOOL_RESULT -> {
+                    // Осиротевший результат (не должно случаться, но страхуемся)
+                    ToolResultBlock(result = block.content)
+                    i++
+                }
+                ChatBlockType.IMAGE -> {
+                    block.imageUrl?.let { url ->
+                        val fullUrl = if (url.startsWith("/")) "$baseUrl$url" else url
+                        AsyncImage(
+                            model = fullUrl,
+                            contentDescription = "Generated image",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp, vertical = 4.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.FillWidth
+                        )
+                    }
+                    i++
                 }
             }
         }
@@ -279,6 +313,111 @@ fun ToolCallBlock(toolName: String, input: String) {
                     fontSize = 13.sp,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     lineHeight = 18.sp
+                )
+            }
+        }
+    }
+}
+
+// Объединённый блок: tool call + результат в одном surface через разделитель
+@Composable
+fun ToolUseResultBlock(toolName: String, input: String, result: String) {
+    var expandedInput by remember { mutableStateOf(false) }
+    var expandedResult by remember { mutableStateOf(false) }
+    val preview = result.take(120).replace('\n', ' ')
+
+    Surface(
+        color = Color(0xFF0D1F0D),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column {
+            // ── Tool call header ──────────────────────────────────────────
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clickable { expandedInput = !expandedInput }
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+            ) {
+                Icon(
+                    Icons.Outlined.Build,
+                    contentDescription = null,
+                    tint = Color(0xFF4CAF50),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    toolName,
+                    color = Color(0xFF4CAF50),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    if (expandedInput) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = null,
+                    tint = Color(0xFF666666),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            AnimatedVisibility(
+                visible = expandedInput && input.isNotBlank(),
+                enter = fadeIn(tween(200)) + expandVertically(tween(250, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(150)) + shrinkVertically(tween(200, easing = FastOutLinearInEasing))
+            ) {
+                Text(
+                    input,
+                    color = Color(0xFF888888),
+                    fontSize = 13.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
+                )
+            }
+
+            // ── Разделитель ───────────────────────────────────────────────
+            HorizontalDivider(color = Color(0xFF1E3A1E), thickness = 1.dp)
+
+            // ── Result ────────────────────────────────────────────────────
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clickable { expandedResult = !expandedResult }
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+            ) {
+                Icon(
+                    Icons.Outlined.Output,
+                    contentDescription = null,
+                    tint = Color(0xFF888888),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (expandedResult) "Result" else preview,
+                    color = Color(0xFF888888),
+                    fontSize = 13.sp,
+                    maxLines = if (expandedResult) Int.MAX_VALUE else 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(
+                    if (expandedResult) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
+                    contentDescription = null,
+                    tint = Color(0xFF666666),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+            AnimatedVisibility(
+                visible = expandedResult,
+                enter = fadeIn(tween(200)) + expandVertically(tween(250, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(150)) + shrinkVertically(tween(200, easing = FastOutLinearInEasing))
+            ) {
+                Text(
+                    text = result,
+                    color = Color(0xFFAAAAAA),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 10.dp)
                 )
             }
         }

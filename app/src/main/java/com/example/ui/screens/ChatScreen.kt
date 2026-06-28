@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.example.SessionViewModel
+import com.example.data.ChatBlockType
 import com.example.ui.components.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -352,7 +353,15 @@ fun ChatScreen(
                             HeightCachingItem(
                                 cacheKey = msg.id,
                                 heightCache = itemHeights,
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier.fillMaxWidth(),
+                                // Сообщения с раскрывающимися блоками не получают
+                                // heightIn(min=…) — иначе после схлопывания остаётся
+                                // чёрное пустое пространство равное закэшированной высоте.
+                                isExpandable = msg.blocks.any {
+                                    it.type == ChatBlockType.TOOL_USE ||
+                                    it.type == ChatBlockType.TOOL_RESULT ||
+                                    it.type == ChatBlockType.THINKING
+                                }
                             ) {
                                 if (msg.role == "user") {
                                     UserMessageBubble(msg, baseUrl, copyAction)
