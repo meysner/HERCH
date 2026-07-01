@@ -27,13 +27,16 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
+import coil.compose.AsyncImage
 import com.example.data.WorkspaceEntry
 import kotlinx.coroutines.launch
 import java.io.File
@@ -72,6 +75,19 @@ private fun getFileIcon(entry: WorkspaceEntry): androidx.compose.ui.graphics.vec
 private fun getMimeType(fileName: String): String {
     val ext = fileName.substringAfterLast('.', "").lowercase()
     return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+}
+
+private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp")
+
+// Раньше файлы в проводнике воркспейса всегда показывались общей иконкой,
+// даже картинки — в отличие от типичного файлового браузера, где по .jpg/.png
+// сразу видно превью. Используем тот же /api/file/raw эндпоинт, что и скачивание.
+private fun imageThumbnailUrl(entry: WorkspaceEntry, baseUrl: String, sessionId: String): String? {
+    if (entry.type == "dir") return null
+    val ext = entry.name.substringAfterLast('.', "").lowercase()
+    if (ext !in IMAGE_EXTENSIONS) return null
+    val encodedPath = java.net.URLEncoder.encode(entry.path, "UTF-8")
+    return "$baseUrl/api/file/raw?session_id=$sessionId&path=$encodedPath"
 }
 
 private fun parentPath(path: String): String {
@@ -308,7 +324,11 @@ fun WorkspaceBrowserSheet(
                             }
 
                             items(files, key = { "f:${it.path}" }) { entry ->
-                                FileRow(entry = entry, onClick = { selectedFile = entry })
+                                FileRow(
+                                    entry = entry,
+                                    onClick = { selectedFile = entry },
+                                    thumbnailUrl = imageThumbnailUrl(entry, viewModel.getBaseUrl(), sessionId)
+                                )
                             }
                         }
                     }
@@ -407,7 +427,7 @@ fun WorkspaceBrowserSheet(
 }
 
 @Composable
-private fun FileRow(entry: WorkspaceEntry, onClick: () -> Unit) {
+private fun FileRow(entry: WorkspaceEntry, onClick: () -> Unit, thumbnailUrl: String? = null) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -415,12 +435,23 @@ private fun FileRow(entry: WorkspaceEntry, onClick: () -> Unit) {
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            imageVector = getFileIcon(entry),
-            contentDescription = null,
-            tint = if (entry.type == "dir") Color(0xFFFFD700) else Color(0xFF888888),
-            modifier = Modifier.size(22.dp)
-        )
+        if (thumbnailUrl != null) {
+            AsyncImage(
+                model = thumbnailUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(RoundedCornerShape(4.dp))
+            )
+        } else {
+            Icon(
+                imageVector = getFileIcon(entry),
+                contentDescription = null,
+                tint = if (entry.type == "dir") Color(0xFFFFD700) else Color(0xFF888888),
+                modifier = Modifier.size(22.dp)
+            )
+        }
         Spacer(modifier = Modifier.width(12.dp))
 
         Column(modifier = Modifier.weight(1f)) {

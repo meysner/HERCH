@@ -451,6 +451,11 @@ class SessionViewModel(
     fun sendMessage(
         text: String,
         attachments: List<JSONObject> = emptyList(),
+        // Локальные URI картинок-вложений (content://...) — нужны, чтобы сразу
+        // показать их в пузыре пользователя, не дожидаясь ответа сервера.
+        // Раньше локальное сообщение собиралось только из text, и вложения
+        // "пропадали" из чата до следующей перезагрузки истории.
+        localImageUris: List<String> = emptyList(),
         reasoningLevel: ReasoningLevel = ReasoningLevel.NONE,
     ) {
         val session = selectedSession ?: return
@@ -458,7 +463,11 @@ class SessionViewModel(
 
         val streamingBlocks = mutableListOf<ChatBlock>().toMutableStateList()
         val userIdx = messages.size
-        val userMsg = ChatMessageItem("user", listOf(ChatBlock(ChatBlockType.TEXT, text)), id = "$sid:$userIdx")
+        val userBlocks = buildList {
+            if (text.isNotBlank()) add(ChatBlock(ChatBlockType.TEXT, text))
+            localImageUris.forEach { uri -> add(ChatBlock(ChatBlockType.IMAGE, content = "", imageUrl = uri)) }
+        }
+        val userMsg = ChatMessageItem("user", userBlocks, id = "$sid:$userIdx")
         val baseMessages = messages + userMsg
 
         val handler = buildHandler(sid, streamingBlocks, baseMessages, sessionTitle = session.title)

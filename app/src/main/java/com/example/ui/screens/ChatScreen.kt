@@ -312,6 +312,11 @@ fun ChatScreen(
                                 put("is_image", json.optBoolean("is_image"))
                             }
                         }
+                        // Локальные content://-URI картинок — чтобы показать их в пузыре
+                        // сообщения сразу, не дожидаясь перезагрузки истории с сервера.
+                        val localImageUris = attachmentsState
+                            .filter { it.mimeType.startsWith("image/") }
+                            .map { it.uri.toString() }
                         attachmentsState = emptyList()
                         composerText = ""
                         // Очищаем черновик при отправке
@@ -327,6 +332,7 @@ fun ChatScreen(
                         viewModel.sendMessage(
                             text = text,
                             attachments = uploadedJson,
+                            localImageUris = localImageUris,
                             reasoningLevel = currentReasoningLevel,
                         )
                         scrollToBottom = true

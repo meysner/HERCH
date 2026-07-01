@@ -37,6 +37,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 
 data class AttachmentState(
     val id: String = java.util.UUID.randomUUID().toString(),
@@ -458,6 +460,7 @@ fun ChatBottomBar(
 
 @Composable
 fun AttachmentChip(attachment: AttachmentState, onRemove: () -> Unit) {
+    val isImage = attachment.mimeType.startsWith("image/")
     Surface(
         color = Color(0xFF2C2C2C),
         shape = RoundedCornerShape(12.dp),
@@ -465,9 +468,54 @@ fun AttachmentChip(attachment: AttachmentState, onRemove: () -> Unit) {
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 12.dp, end = 6.dp),
+            modifier = Modifier.padding(start = if (isImage) 6.dp else 12.dp, end = 6.dp),
         ) {
             when {
+                // Превью изображения вместо общей иконки — раньше даже для только
+                // что снятого камерой/выбранного из галереи фото рисовалась
+                // generic-иконка, и пользователь не мог проверить, что именно
+                // прикрепил, до отправки.
+                isImage -> Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    AsyncImage(
+                        model = attachment.uri,
+                        contentDescription = "Attached image",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                    if (attachment.isUploading) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0x99000000)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                                color = Color(0xFFFFD700),
+                            )
+                        }
+                    } else if (attachment.error != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0x99000000)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Outlined.ErrorOutline,
+                                contentDescription = "Error",
+                                tint = Color(0xFFFF6B6B),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                }
                 attachment.isUploading -> CircularProgressIndicator(
                     modifier = Modifier.size(16.dp),
                     strokeWidth = 2.dp,
@@ -480,8 +528,7 @@ fun AttachmentChip(attachment: AttachmentState, onRemove: () -> Unit) {
                     modifier = Modifier.size(20.dp),
                 )
                 else -> Icon(
-                    if (attachment.mimeType.startsWith("image/")) Icons.Outlined.Image
-                    else Icons.Outlined.InsertDriveFile,
+                    Icons.Outlined.InsertDriveFile,
                     contentDescription = "File",
                     tint = Color(0xFF888888),
                     modifier = Modifier.size(20.dp),
