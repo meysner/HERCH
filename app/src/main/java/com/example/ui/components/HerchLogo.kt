@@ -119,7 +119,7 @@ enum class HerchLogoState { IDLE, LOADING, WAITING, REASONING, TOOL_USE, WRITING
 private enum class LogoEffect { SINE, DNA, DNA2, RADAR, TOOLUSE }
 private enum class WaveState { IDLE, INTRO, FLOW, OUTRO }
 
-private const val TRANSITION_MS = 600f
+private const val TRANSITION_MS = 900f
 private const val SWEEP_DURATION_MS = 1600
 
 private fun stateToEffect(state: HerchLogoState): LogoEffect = when (state) {
@@ -329,10 +329,7 @@ fun HerchLogo(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             ) {
-                // Клик разрешен только когда логотип не находится в режиме системной анимации
-                if (!isAnimating) {
-                    clickTrigger++
-                }
+                if (!isAnimating) clickTrigger++
             }
     ) {
         val cellW     = size.width  / COLS.toFloat()
@@ -374,58 +371,56 @@ fun HerchLogo(
             val envelope   = 1f - normX * normX
 
             for (pt in pts) {
-                if (lerpFactor < 0.001f) continue
+                if (lerpFactor == 0f) {
+                    if (pt.initIntensity > 0f) {
+                        val origIdx = pt.origRow * COLS + col
+                        gridIntensities[origIdx] = max(gridIntensities[origIdx], 1f)
+                    }
+                } else {
+                    val target = computeTarget(currentEffect, col, pt, envelope, wp, timeMs)
 
-                val target = computeTarget(currentEffect, col, pt, envelope, wp, timeMs)
-                val targetY          = target.y
-                val targetThickness  = target.thickness
-                val targetIntensity  = target.intensity
+                    val currentThickness = 0.5f + (target.thickness - 0.5f) * lerpFactor
+                    val yInterp          = pt.origRow + (target.y - pt.origRow) * lerpFactor
+                    val finalIntensity   = pt.initIntensity + (target.intensity - pt.initIntensity) * lerpFactor
 
-                val currentThickness = 0.5f + (targetThickness - 0.5f) * lerpFactor
-                val yInterp          = pt.origRow + (targetY - pt.origRow) * lerpFactor
-                val finalIntensity   = pt.initIntensity + (targetIntensity - pt.initIntensity) * lerpFactor
+                    val startRow = max(0, floor(yInterp - currentThickness).toInt())
+                    val endRow   = min(ROWS - 1, ceil(yInterp + currentThickness).toInt())
 
-                if (lerpFactor < 1f && pt.initIntensity > 0f) {
-                    val origIdx = pt.origRow * COLS + col
-                    gridIntensities[origIdx] = max(gridIntensities[origIdx], (1f - lerpFactor) * pt.initIntensity)
-                }
-
-                val startRow = max(0, floor(yInterp - currentThickness).toInt())
-                val endRow   = min(ROWS - 1, ceil(yInterp + currentThickness).toInt())
-                for (r in startRow..endRow) {
-                    val dist = abs(r - yInterp)
-                    if (dist <= currentThickness) {
-                        val weight = 1f - dist / currentThickness
-                        val idx    = r * COLS + col
-                        gridIntensities[idx] = max(gridIntensities[idx], weight * finalIntensity * lerpFactor)
+                    for (r in startRow..endRow) {
+                        val dist = abs(r - yInterp)
+                        if (dist <= currentThickness) {
+                            val weight = 1f - dist / currentThickness
+                            val idx    = r * COLS + col
+                            gridIntensities[idx] = max(gridIntensities[idx], weight * finalIntensity)
+                        }
                     }
                 }
             }
         }
 
-        // ── Расчет параметров блика ──────────────────────────────────────────
-        val sweepWidth = 9f
-        val showSweep = sweepProgress.value < 1f
+        val sweepWidth  = 9f
+        val showSweep   = sweepProgress.value < 1f
         val sweepCenter = sweepProgress.value * (COLS + sweepWidth * 2f + ROWS * 0.6f) - (sweepWidth + ROWS * 0.3f)
 
-        // ── Рендер ───────────────────────────────────────────────────────────
         for (i in 0 until TOTAL) {
-            val col        = i % COLS
-            val row        = i / COLS
+            val col = i % COLS
+            val row = i / COLS
             if ((col == 0 || col == COLS - 1) && (row == 0 || row == ROWS - 1)) continue
-            val centerX    = cellW * col + cellW / 2f
-            val centerY    = cellH * row + cellH / 2f
-            val isLetter   = LETTER_MASK[i]
-            val lerpFactor = lerpTable[col]
 
-            if (lerpFactor < 0.01f) {
-                val color = if (isLetter) DotGold else DotBase
-                drawCircle(color = color, radius = dotRadius, center = Offset(centerX, centerY))
+            val centerX = cellW * col + cellW / 2f
+            val centerY = cellH * row + cellH / 2f
 
-                if (isLetter && showSweep) {
+            val finalBrightness = gridIntensities[i]
+
+            val isLedOn = finalBrightness > 0.35f
+
+            if (isLedOn) {
+                drawCircle(color = animatedColor, radius = dotRadius, center = Offset(centerX, centerY))
+
+                if (showSweep) {
                     val distToSweep = abs((col + row * 0.6f) - sweepCenter)
                     if (distToSweep < sweepWidth) {
-                        val alpha = ((1f - distToSweep / sweepWidth) * 0.85f).coerceIn(0f, 1f)
+                        val alpha = ((1f - distToSweep / sweepWidth) * 0.85f * finalBrightness).coerceIn(0f, 1f)
                         drawCircle(
                             color  = Color.White.copy(alpha = alpha),
                             radius = dotRadius,
@@ -434,24 +429,7 @@ fun HerchLogo(
                     }
                 }
             } else {
-                val brightness = gridIntensities[i]
-                if (brightness > 0.25f) {
-                    drawCircle(color = animatedColor, radius = dotRadius, center = Offset(centerX, centerY))
-
-                    if (showSweep) {
-                        val distToSweep = abs((col + row * 0.6f) - sweepCenter)
-                        if (distToSweep < sweepWidth) {
-                            val alpha = ((1f - distToSweep / sweepWidth) * 0.85f * brightness).coerceIn(0f, 1f)
-                            drawCircle(
-                                color  = Color.White.copy(alpha = alpha),
-                                radius = dotRadius,
-                                center = Offset(centerX, centerY)
-                            )
-                        }
-                    }
-                } else {
-                    drawCircle(color = DotBase, radius = dotRadius, center = Offset(centerX, centerY))
-                }
+                drawCircle(color = DotBase, radius = dotRadius, center = Offset(centerX, centerY))
             }
         }
     }
