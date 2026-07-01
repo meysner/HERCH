@@ -419,6 +419,11 @@ fun AppMenuScreen(
             items(sessions, key = { it.sessionId }) { session ->
                 val isActive = viewModel.inflightSessions.containsKey(session.sessionId)
                 val isUnread = viewModel.unreadSessions[session.sessionId] == true
+                // attention приходит прямо в /api/sessions (см. HermesApiClient.toSessionAttention) —
+                // сервер знает про approval/clarify независимо от того, открыт ли
+                // сейчас живой SSE на эту сессию, так что бейдж виден даже если
+                // мы никогда не стримили эту сессию с этого устройства.
+                val needsAttention = session.attention != null
                 val otherSessionStreaming = viewModel.inflightSessions.isNotEmpty() && !isActive
 
                 val pulseAlpha by rememberInfiniteTransition(label = "pulse_${session.sessionId}")
@@ -453,7 +458,15 @@ fun AppMenuScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (isActive) {
+                        if (needsAttention) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFFA726))
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        } else if (isActive) {
                             Box(
                                 modifier = Modifier
                                     .size(7.dp)
@@ -478,22 +491,27 @@ fun AppMenuScreen(
                             maxLines = 2,
                             modifier = Modifier.weight(1f),
                             lineHeight = 20.sp,
-                            fontWeight = if (isActive || isUnread) FontWeight.SemiBold else FontWeight.Medium
+                            fontWeight = if (needsAttention || isActive || isUnread) FontWeight.SemiBold else FontWeight.Medium
                         )
                         Text(
                             text = formatSessionTime(session.updatedAt),
-                            color = if (isActive || isUnread) Color(0xFFFFD700) else Color(0xFF888888),
+                            color = if (needsAttention) Color(0xFFFFA726) else if (isActive || isUnread) Color(0xFFFFD700) else Color(0xFF888888),
                             fontSize = 13.sp,
                             modifier = Modifier.padding(start = 16.dp)
                         )
                     }
                     Text(
                         text = when {
+                            needsAttention -> if (session.attention?.kind == com.example.data.SessionAttentionKind.APPROVAL) {
+                                "Needs your approval"
+                            } else {
+                                "Agent asked a question"
+                            }
                             isActive -> "Request in progress..."
                             isUnread -> "New message"
                             else -> sessionMeta(session)
                         },
-                        color = if (isActive || isUnread) Color(0xFFFFD700).copy(alpha = 0.75f) else Color(0xFF888888),
+                        color = if (needsAttention) Color(0xFFFFA726).copy(alpha = 0.9f) else if (isActive || isUnread) Color(0xFFFFD700).copy(alpha = 0.75f) else Color(0xFF888888),
                         fontSize = 13.sp,
                         modifier = Modifier.padding(top = 2.dp)
                     )

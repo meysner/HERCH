@@ -380,7 +380,7 @@ fun ChatBottomBar(
                         modifier = Modifier.width(64.dp).height(16.dp),
                         isProcessing = isStreaming,
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -412,7 +412,7 @@ fun ChatBottomBar(
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,

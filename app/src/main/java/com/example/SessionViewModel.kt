@@ -19,6 +19,8 @@ import com.example.data.ModelInfo
 import com.example.data.ProfileInfo
 import com.example.data.NewSessionResult
 import com.example.data.SessionsResult
+import com.example.di.SessionInflightState
+import com.example.di.SessionStreamRepository
 import com.example.domain.StreamEventHandler
 import com.example.network.HermesApiClient
 import com.example.ui.components.ReasoningLevel
@@ -43,12 +45,6 @@ private fun findModelById(models: List<ModelInfo>, modelId: String?): ModelInfo?
     }
 }
 
-data class SessionInflightState(
-    val blocks: SnapshotStateList<ChatBlock>,
-    val baseMessages: List<ChatMessageItem>,
-    val streamId: String? = null,
-    var lastActivityMs: Long = System.currentTimeMillis(),
-)
 
 class SessionViewModel(
     private val prefs: SharedPreferences,
@@ -102,7 +98,11 @@ class SessionViewModel(
         private set
 
     // ── INFLIGHT map: sessionId -> live стрим ─────────────────────────────
-    val inflightSessions = mutableStateMapOf<String, SessionInflightState>()
+    // Данные вынесены в SessionStreamRepository (process-scoped singleton),
+    // чтобы StreamGuardService мог видеть их без ссылки на этот
+    // Activity-scoped ViewModel. Имена/поведение не меняются — это те же
+    // мутируемые map'ы, просто физически лежат не здесь.
+    val inflightSessions get() = SessionStreamRepository.inflightSessions
 
     val unreadSessions = mutableStateMapOf<String, Boolean>()
 
@@ -110,8 +110,8 @@ class SessionViewModel(
         get() = selectedSession?.sessionId?.let { inflightSessions.containsKey(it) } ?: false
 
     // ── Pending per-session ────────────────────────────────────────────────
-    private val pendingApprovals = mutableMapOf<String, JSONObject?>()
-    private val pendingClarifies = mutableMapOf<String, JSONObject?>()
+    private val pendingApprovals get() = SessionStreamRepository.pendingApprovals
+    private val pendingClarifies get() = SessionStreamRepository.pendingClarifies
 
     val pendingApproval: JSONObject?
         get() = selectedSession?.sessionId?.let { pendingApprovals[it] }
@@ -251,6 +251,7 @@ class SessionViewModel(
         prefs.edit()
             .putBoolean("unread_$sid", false)
             .putInt("msg_count_$sid", session.messageCount ?: 0)
+            .remove("attention_notified_$sid") // см. SessionsCheckWorker — сброс дедупа уведомлений
             .apply()
         if (loadingSessionId == sid) return
 
@@ -291,6 +292,34 @@ class SessionViewModel(
         }
     }
 
+    /**
+     * Открытие по одному sessionId — нужен для deep-link из уведомления
+     * (StreamGuardService/SessionsCheckWorker/CronCheckWorker знают только ID,
+     * а не полный MobileSession). Сначала смотрим в уже загруженный список
+     * (`sessions`), при холодном старте приложения (список ещё пуст) —
+     * подгружаем через refreshSessions() и открываем, когда он появится.
+     */
+    fun openSessionById(sessionId: String) {
+        sessions.find { it.sessionId == sessionId }?.let {
+            openSession(it)
+            return
+        }
+        viewModelScope.launch {
+            val cached = _apiClient.getCachedSessions()
+            cached?.find { it.sessionId == sessionId }?.let {
+                openSession(it)
+                return@launch
+            }
+            when (val result = _apiClient.listSessions()) {
+                is SessionsResult.Success -> {
+                    sessions = result.sessions
+                    result.sessions.find { it.sessionId == sessionId }?.let { openSession(it) }
+                }
+                is SessionsResult.Failure -> sessionsError = result.message
+            }
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Стриминг — общий построитель StreamEventHandler
     // ─────────────────────────────────────────────────────────────────────
@@ -303,13 +332,14 @@ class SessionViewModel(
         sid: String,
         streamingBlocks: SnapshotStateList<ChatBlock>,
         baseMessages: List<ChatMessageItem>,
+        sessionTitle: String = "",
     ): StreamEventHandler = StreamEventHandler(
         sessionId = sid,
         blocks = streamingBlocks,
         onActivity = { inflightSessions[sid]?.lastActivityMs = System.currentTimeMillis() },
         onStreamStarted = { streamId ->
             inflightSessions[sid] = inflightSessions[sid]?.copy(streamId = streamId)
-                ?: SessionInflightState(streamingBlocks, baseMessages, streamId)
+                ?: SessionInflightState(streamingBlocks, baseMessages, streamId, title = sessionTitle)
         },
         onPendingApproval = { obj ->
             pendingApprovals[sid] = obj
@@ -426,7 +456,7 @@ class SessionViewModel(
         val userMsg = ChatMessageItem("user", listOf(ChatBlock(ChatBlockType.TEXT, text)), id = "$sid:$userIdx")
         val baseMessages = messages + userMsg
 
-        val handler = buildHandler(sid, streamingBlocks, baseMessages)
+        val handler = buildHandler(sid, streamingBlocks, baseMessages, sessionTitle = session.title)
 
         viewModelScope.launch {
             // Синхронизируем effort ДО показа UI-заглушки — если не удалось
@@ -447,6 +477,7 @@ class SessionViewModel(
             inflightSessions[sid] = SessionInflightState(
                 blocks = streamingBlocks,
                 baseMessages = baseMessages,
+                title = session.title,
             )
 
             try {

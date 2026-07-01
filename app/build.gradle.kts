@@ -1,3 +1,4 @@
+
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 
 plugins {
@@ -111,6 +112,10 @@ dependencies {
   implementation("com.github.jeziellago:compose-markdown:0.7.2")
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
+  // WorkManager -- фоновые проверки сессий/cron-задач (SessionsCheckWorker,
+  // CronCheckWorker, см. package com.example.work). Строкой, как окhttp-sse
+  // и compose-markdown выше -- в libs.versions.toml алиаса пока нет.
+  implementation("androidx.work:work-runtime-ktx:2.9.1")
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)

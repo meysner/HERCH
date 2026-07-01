@@ -1,8 +1,13 @@
 package com.example
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -16,8 +21,11 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import com.example.di.SessionStreamRepository
 import com.example.network.PREF_COOKIES
+import com.example.notifications.NotificationHelper
 import com.example.ui.screens.AppMenuScreen
 import com.example.ui.screens.ChatScreen
 import com.example.ui.screens.HermesLoginScreen
@@ -25,6 +33,7 @@ import com.example.ui.screens.MemoryScreen
 import com.example.ui.screens.StatsScreen
 import com.example.ui.screens.TasksScreen
 import com.example.ui.theme.MyApplicationTheme
+import com.example.work.StreamGuardService
 import kotlinx.coroutines.launch
 
 private const val PREFS_NAME = "herch_hermes"
@@ -38,6 +47,21 @@ sealed class Screen {
     object Memory : Screen()
     object Stats : Screen()
     object Tasks : Screen()
+}
+
+// Куда должен перейти UI по tap на уведомление (см. NotificationHelper).
+sealed class DeepLink {
+    data class OpenSession(val sessionId: String) : DeepLink()
+    object OpenTasks : DeepLink()
+}
+
+private fun deepLinkFromIntent(intent: Intent?): DeepLink? {
+    val sessionId = intent?.getStringExtra(NotificationHelper.EXTRA_SESSION_ID)
+    if (!sessionId.isNullOrBlank()) return DeepLink.OpenSession(sessionId)
+    if (intent?.getStringExtra(NotificationHelper.EXTRA_SCREEN) == NotificationHelper.SCREEN_TASKS) {
+        return DeepLink.OpenTasks
+    }
+    return null
 }
 
 class MainActivity : ComponentActivity() {
@@ -54,15 +78,45 @@ class MainActivity : ComponentActivity() {
         SessionViewModel.Factory(prefs, httpClient)
     }
 
+    // Deep-link из уведомления (открыть конкретную сессию/экран задач).
+    // mutableStateOf, а не просто поле — HerchApp() читает это через
+    // LaunchedEffect и должен перерисоваться, когда значение меняется, в том
+    // числе повторно при onNewIntent() на уже запущенной Activity
+    // (android:launchMode="singleTop").
+    private val pendingDeepLink = mutableStateOf<DeepLink?>(null)
+
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { /* игнорируем ответ: без разрешения просто не будет уведомлений, остальной функционал не блокируем */ }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        pendingDeepLink.value = deepLinkFromIntent(intent)
+        requestNotificationPermissionIfNeeded()
 
         setContent {
             MyApplicationTheme {
-                HerchApp(viewModel = viewModel, prefs = prefs, httpClient = httpClient)
+                HerchApp(
+                    viewModel = viewModel,
+                    prefs = prefs,
+                    httpClient = httpClient,
+                    pendingDeepLink = pendingDeepLink,
+                )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingDeepLink.value = deepLinkFromIntent(intent)
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     // onStart/onStop -- это переходы всего приложения между передним планом
@@ -72,10 +126,18 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         viewModel.setForeground(true)
+        // Приложение снова на переднем плане -- живой UI (ChatScreen/3с
+        // поллинг) сам отражает состояние, sticky-уведомление больше не
+        // нужно. Если пользователь снова свернёт приложение во время
+        // активного стрима, onStop() ниже поднимет сервис заново.
+        StreamGuardService.stop(this)
     }
 
     override fun onStop() {
         viewModel.setForeground(false)
+        if (SessionStreamRepository.hasActiveWork) {
+            StreamGuardService.start(this)
+        }
         super.onStop()
     }
 }
@@ -85,6 +147,7 @@ private fun HerchApp(
     viewModel: SessionViewModel,
     prefs: android.content.SharedPreferences,
     httpClient: okhttp3.OkHttpClient,
+    pendingDeepLink: MutableState<DeepLink?>,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -94,6 +157,23 @@ private fun HerchApp(
     var currentScreen by remember {
         val savedUrl = prefs.getString("webui_url", "").orEmpty()
         mutableStateOf<Screen>(if (savedUrl.isNotBlank()) Screen.Menu else Screen.Login)
+    }
+
+    // Реакция на tap по уведомлению (первый запуск через onCreate() и любой
+    // повторный через onNewIntent() на уже живой Activity). Не открываем
+    // deep-link поверх экрана логина -- сперва обычный вход, ссылка потеряется,
+    // это ожидаемо и безопаснее, чем тащить состояние через логин-флоу.
+    LaunchedEffect(pendingDeepLink.value) {
+        val link = pendingDeepLink.value ?: return@LaunchedEffect
+        if (currentScreen is Screen.Login) return@LaunchedEffect
+        when (link) {
+            is DeepLink.OpenSession -> {
+                viewModel.openSessionById(link.sessionId)
+                currentScreen = Screen.Chat
+            }
+            is DeepLink.OpenTasks -> currentScreen = Screen.Tasks
+        }
+        pendingDeepLink.value = null
     }
 
     // ChatScreen живёт постоянно (не пересоздаётся при переключении сессий)

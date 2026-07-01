@@ -55,6 +55,7 @@ private fun statusColor(status: CronJobStatus): Color = when (status) {
     CronJobStatus.OFF -> Color(0xFF555555)
     CronJobStatus.ERROR -> Color(0xFFFF6B6B)
     CronJobStatus.NEEDS_ATTENTION -> Color(0xFFFFA726)
+    CronJobStatus.SCHEDULE_ERROR -> Color(0xFFFFA726)
 }
 
 private fun statusLabel(status: CronJobStatus): String = when (status) {
@@ -63,6 +64,7 @@ private fun statusLabel(status: CronJobStatus): String = when (status) {
     CronJobStatus.OFF -> "Off"
     CronJobStatus.ERROR -> "Error"
     CronJobStatus.NEEDS_ATTENTION -> "Needs attention"
+    CronJobStatus.SCHEDULE_ERROR -> "Needs attention"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

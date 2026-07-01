@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import com.example.data.ChatBlock
 import com.example.data.ChatBlockType
 import com.example.data.ChatMessageItem
+import com.example.data.CronCompletion
 import com.example.data.MobileSession
 import com.example.data.InsightsData
 import com.example.data.MemoryData
@@ -48,6 +49,14 @@ class HermesApiClient(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private val client = httpClient
     val okHttpClient get() = client
+
+    companion object {
+        // Backoff между попытками реконнекта живого SSE-стрима (см. sendAndStream).
+        // 3 попытки вместо 1 -- переживаем короткие сетевые обрывы при
+        // свёрнутом приложении, не полагаясь на то, что первая же попытка
+        // застанет живую сеть.
+        private val STREAM_RECONNECT_BACKOFF_MS = longArrayOf(1500L, 3000L, 6000L)
+    }
 
     // Кэш baseUrl: читаем prefs только при реальном изменении
     @Volatile private var _cachedBaseUrl: String = ""
@@ -451,14 +460,21 @@ class HermesApiClient(
         val liveUrl = "$baseUrl/api/chat/stream?stream_id=$streamId"
         var failure = connectOnce(liveUrl)
 
-        // Зеркалим логику веб-клиента (messages.js attachLiveStream/onerror):
-        // ровно одна попытка реконнекта. Сначала спрашиваем у сервера статус
-        // стрима -- если воркер ещё жив, просто продолжаем читать тот же
-        // живой поток; если воркер уже завершился, реплеим хвост из журнала
-        // запуска начиная с последнего увиденного event_id/seq, чтобы не
-        // потерять и не задублировать события.
-        if (failure != null) {
-            delay(1500)
+        // Веб-клиент (messages.js attachLiveStream/onerror) делает ровно одну
+        // попытку реконнекта. Мобильный клиент раньше это зеркалил, но теперь
+        // фоновые слои (StreamGuardService, sticky-уведомление) полагаются на
+        // то, что onDone()/onError() отражают реальный исход на сервере, а не
+        // первый сетевой сбой на свёрнутом экране/шатком мобильном интернете —
+        // поэтому здесь несколько попыток с backoff вместо одной. Turn на
+        // сервере в любом случае выполняется независимо от клиента (см.
+        // /api/chat/stream/status: active/replay_available), так что каждая
+        // попытка просто заново решает, продолжать ли живой поток или
+        // реплеить хвост из журнала запуска с последнего увиденного
+        // event_id/seq, чтобы не потерять и не задублировать события.
+        var attempt = 0
+        while (failure != null && attempt < STREAM_RECONNECT_BACKOFF_MS.size) {
+            delay(STREAM_RECONNECT_BACKOFF_MS[attempt])
+            attempt++
             val status = fetchStreamStatus(baseUrl, streamId)
             val reconnectUrl = when {
                 status == null -> null
@@ -469,7 +485,8 @@ class HermesApiClient(
                 }
                 else -> null
             }
-            failure = if (reconnectUrl != null) connectOnce(reconnectUrl) else failure
+            if (reconnectUrl == null) break
+            failure = connectOnce(reconnectUrl)
         }
 
         withContext(Dispatchers.Main) {
@@ -866,6 +883,22 @@ class HermesApiClient(
         }.getOrDefault(emptyList())
     }
 
+    /**
+     * Диф-эндпоинт для фонового опроса (CronCheckWorker): возвращает только джобы,
+     * завершившиеся после [sinceEpochSeconds] — сервер сам считает дифф
+     * (см. api/routes.py::_handle_cron_recent), поэтому клиенту не нужно
+     * тащить полный список и сравнивать самому.
+     */
+    suspend fun listRecentCronCompletions(sinceEpochSeconds: Double): List<CronCompletion> =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val baseUrl = savedBaseUrl()
+                val body = get("$baseUrl/api/crons/recent?since=$sinceEpochSeconds")
+                val arr = JSONObject(body).optJSONArray("completions") ?: JSONArray()
+                List(arr.length()) { i -> arr.getJSONObject(i).toCronCompletion() }
+            }.getOrDefault(emptyList())
+        }
+
     suspend fun runCronJob(jobId: String) = withContext(Dispatchers.IO) {
         runCatching { postJobAction("${savedBaseUrl()}/api/crons/run", jobId) }
     }
@@ -888,6 +921,7 @@ class HermesApiClient(
 
     private fun JSONObject.toCronJob(): com.example.data.CronJob {
         val schedule = optJSONObject("schedule")
+        val repeat = optJSONObject("repeat")
         return com.example.data.CronJob(
             id = optString("id"),
             name = optString("name").ifBlank { null },
@@ -901,8 +935,22 @@ class HermesApiClient(
             lastStatus = optString("last_status").ifBlank { null },
             lastError = optString("last_error").ifBlank { null },
             prompt = optString("prompt").ifBlank { null },
+            // Зеркалит static/panels.js: _isRecurringCronJob / _hasUnlimitedRepeat
+            scheduleKind = schedule?.optString("kind")?.ifBlank { null },
+            repeatUnlimited = repeat != null && (!repeat.has("times") || repeat.isNull("times")),
+            toastNotifications = optBoolean("toast_notifications", true),
         )
     }
+
+    // Один элемент ответа /api/crons/recent (см. api/routes.py::_handle_cron_recent).
+    private fun JSONObject.toCronCompletion(): CronCompletion = CronCompletion(
+        jobId = optString("job_id"),
+        name = optString("name").ifBlank { null },
+        status = optString("status").ifBlank { null },
+        completedAtEpochSeconds = optDouble("completed_at", 0.0),
+        toastNotifications = optBoolean("toast_notifications", true),
+        sessionId = optString("session_id").ifBlank { null },
+    )
 
     private fun savedBaseUrl(): String {
         val raw = prefs.getString("webui_url", "").orEmpty()
@@ -940,6 +988,24 @@ class HermesApiClient(
                 else -> null
             },
             projectId = optString("project_id").ifBlank { null },
+            attention = optJSONObject("attention")?.toSessionAttention(),
+            isStreaming = optBoolean("is_streaming", false) || optString("active_stream_id").isNotBlank(),
+        )
+    }
+
+    // Зеркалит api/routes.py::_session_attention_summary(): {"kind": "approval"|"clarify", "count", "severity"}.
+    // Считается сервером независимо от открытого SSE-соединения — доступно и
+    // при холодном опросе /api/sessions (WorkManager), и в живом списке.
+    private fun JSONObject.toSessionAttention(): com.example.data.SessionAttention? {
+        val kind = when (optString("kind")) {
+            "approval" -> com.example.data.SessionAttentionKind.APPROVAL
+            "clarify" -> com.example.data.SessionAttentionKind.CLARIFY
+            else -> return null
+        }
+        return com.example.data.SessionAttention(
+            kind = kind,
+            count = optInt("count", 1),
+            severity = optString("severity").ifBlank { null },
         )
     }
 }
