@@ -46,6 +46,11 @@ data class ChatBlock(
     val toolName: String? = null,
     val imageUrl: String? = null,
     val mimeType: String? = null,
+    // ID вызова инструмента (tool_call_id/tool_use_id с сервера). Используется,
+    // чтобы сопоставлять TOOL_USE с "своим" TOOL_RESULT по ID, а не по позиции
+    // в списке — иначе параллельные/одноимённые вызовы инструментов путаются
+    // или перезатирают друг друга (см. StreamEventHandler).
+    val toolCallId: String? = null,
 )
 
 data class ChatMessageItem(

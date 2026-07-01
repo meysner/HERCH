@@ -105,7 +105,12 @@ fun ChatBottomBar(
     }
 
     val isUploadingAny = attachments.any { it.isUploading }
-    val canSend = !isStreaming && !isUploadingAny && isEnabled &&
+    // Вложение с ошибкой загрузки молча выпадало бы из сообщения при отправке
+    // (ChatScreen берёт только attachments с uploadResult != null) — блокируем
+    // отправку, пока пользователь не убрал битое вложение или не подождал
+    // повторной попытки, чтобы сообщение не ушло без файла без предупреждения.
+    val hasFailedUpload = attachments.any { it.error != null }
+    val canSend = !isStreaming && !isUploadingAny && !hasFailedUpload && isEnabled &&
             (composerText.isNotBlank() || attachments.isNotEmpty())
 
     // Порядок уровней. Если сервер прислал список — используем его,

@@ -326,7 +326,12 @@ class SessionViewModel(
 
     /**
      * Строит StreamEventHandler для данной сессии.
-     * Один экземпляр создаётся в sendMessage() и переиспользуется в reattachToService().
+     * Единственный экземпляр создаётся в sendMessage() и живёт до onDone()/onError();
+     * повторного "переподключения" на клиенте нет — если процесс убит посреди
+     * стрима, живые токены/thinking для уже начатого хода не восстанавливаются
+     * (сам ход всё равно доводится до конца на сервере). Следующий цикл
+     * поллинга (startPolling) подхватит готовый результат, как только вырастет
+     * message_count — см. openSession()/startPolling().
      */
     private fun buildHandler(
         sid: String,
@@ -490,8 +495,8 @@ class SessionViewModel(
                     onStreamStarted = { handler.onStreamStarted(it) },
                     onToken      = { handler.onToken(it) },
                     onReasoning  = { handler.onReasoning(it) },
-                    onToolStart  = { name, _, input -> handler.onToolStart(name, input) },
-                    onToolComplete = { _, result -> handler.onToolComplete(result) },
+                    onToolStart  = { name, id, input -> handler.onToolStart(name, id, input) },
+                    onToolComplete = { id, result -> handler.onToolComplete(id, result) },
                     onApproval   = { handler.onPendingApproval(it) },
                     onClarify    = { handler.onPendingClarify(it) },
                     onDone       = { handler.finish() },

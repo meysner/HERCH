@@ -51,19 +51,26 @@ class StreamEventHandler(
 
     fun onReasoning(text: String) = appendWithThrottle(ChatBlockType.THINKING, text)
 
-    fun onToolStart(name: String, input: String) {
+    fun onToolStart(name: String, id: String, input: String) {
         flushBuffer()
-        val last = blocks.lastOrNull()
-        if (last?.type == ChatBlockType.TOOL_USE && last.toolName == name) {
-            blocks[blocks.lastIndex] = last.copy(content = input)
+        // Сопоставляем по id вызова, а не по имени/позиции: сервер шлёт растущий
+        // input для ОДНОГО и того же вызова несколькими "tool"-событиями подряд
+        // (нужно обновлять на месте), но два РАЗНЫХ вызова одного инструмента,
+        // идущих друг за другом (параллельные tool calls), должны остаться
+        // отдельными блоками, а не перезатирать друг друга.
+        val idx = if (id.isNotBlank()) blocks.indexOfLast { it.type == ChatBlockType.TOOL_USE && it.toolCallId == id } else -1
+        if (idx != -1) {
+            blocks[idx] = blocks[idx].copy(content = input)
         } else {
-            blocks.add(ChatBlock(ChatBlockType.TOOL_USE, input, toolName = name))
+            blocks.add(ChatBlock(ChatBlockType.TOOL_USE, input, toolName = name, toolCallId = id.ifBlank { null }))
         }
     }
 
-    fun onToolComplete(result: String) {
+    fun onToolComplete(id: String, result: String) {
         flushBuffer()
-        blocks.add(ChatBlock(ChatBlockType.TOOL_RESULT, result))
+        // Тэгаем результат тем же id — UI сопоставляет TOOL_USE/TOOL_RESULT по
+        // toolCallId, а не по соседству в списке (см. ChatMessageBlocks).
+        blocks.add(ChatBlock(ChatBlockType.TOOL_RESULT, result, toolCallId = id.ifBlank { null }))
     }
 
     fun finish() {

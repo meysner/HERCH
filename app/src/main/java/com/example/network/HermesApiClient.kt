@@ -286,9 +286,9 @@ class HermesApiClient(
                                     val name = block.optString("name")
                                     val input = block.optJSONObject("input")?.toString() ?: ""
                                     val callId = block.optString("id")
-                                    blocks.add(ChatBlock(ChatBlockType.TOOL_USE, input, toolName = name))
+                                    blocks.add(ChatBlock(ChatBlockType.TOOL_USE, input, toolName = name, toolCallId = callId.ifBlank { null }))
                                     toolResults[callId]?.let { result ->
-                                        blocks.add(ChatBlock(ChatBlockType.TOOL_RESULT, result))
+                                        blocks.add(ChatBlock(ChatBlockType.TOOL_RESULT, result, toolCallId = callId.ifBlank { null }))
                                     }
                                 }
                                 "image_url" -> {
@@ -313,9 +313,9 @@ class HermesApiClient(
                             val name = fn?.optString("name") ?: tc.optString("name")
                             val args = fn?.optString("arguments") ?: ""
                             val callId = tc.optString("id")
-                            blocks.add(ChatBlock(ChatBlockType.TOOL_USE, args, toolName = name))
+                            blocks.add(ChatBlock(ChatBlockType.TOOL_USE, args, toolName = name, toolCallId = callId.ifBlank { null }))
                             toolResults[callId]?.let { result ->
-                                blocks.add(ChatBlock(ChatBlockType.TOOL_RESULT, result))
+                                blocks.add(ChatBlock(ChatBlockType.TOOL_RESULT, result, toolCallId = callId.ifBlank { null }))
                             }
                         }
                     }

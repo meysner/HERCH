@@ -207,6 +207,17 @@ fun AssistantMessageBubble(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         val blockList = msg.blocks
+
+        // Сопоставляем TOOL_USE со "своим" TOOL_RESULT по toolCallId, а не по
+        // соседству в списке — при параллельных вызовах инструментов результат
+        // не обязательно оказывается сразу следующим блоком. Для старых данных
+        // без toolCallId (например, уже закэшированная история) используем
+        // адрес по соседству как fallback, сохраняя прежнее поведение.
+        val resultIndexByCallId: Map<String, Int> = blockList.withIndex()
+            .filter { it.value.type == ChatBlockType.TOOL_RESULT && it.value.toolCallId != null }
+            .associate { it.value.toolCallId!! to it.index }
+        val consumedResultIndices = mutableSetOf<Int>()
+
         var i = 0
         while (i < blockList.size) {
             val block = blockList[i]
@@ -232,26 +243,42 @@ fun AssistantMessageBubble(
                     i++
                 }
                 ChatBlockType.TOOL_USE -> {
+                    val matchedIdx = block.toolCallId?.let { resultIndexByCallId[it] }
                     val next = blockList.getOrNull(i + 1)
-                    if (next?.type == ChatBlockType.TOOL_RESULT) {
-                        ToolUseResultBlock(
-                            toolName = block.toolName ?: "tool",
-                            input = block.content,
-                            result = next.content
-                        )
-                        i += 2
-                    } else {
-                        // Результат ещё не пришёл (стриминг)
-                        ToolCallBlock(
-                            toolName = block.toolName ?: "tool",
-                            input = block.content
-                        )
-                        i++
+                    when {
+                        matchedIdx != null -> {
+                            consumedResultIndices.add(matchedIdx)
+                            ToolUseResultBlock(
+                                toolName = block.toolName ?: "tool",
+                                input = block.content,
+                                result = blockList[matchedIdx].content
+                            )
+                            i++
+                        }
+                        // Fallback для блоков без id (старые/закэшированные данные)
+                        block.toolCallId == null && next?.type == ChatBlockType.TOOL_RESULT && next.toolCallId == null -> {
+                            ToolUseResultBlock(
+                                toolName = block.toolName ?: "tool",
+                                input = block.content,
+                                result = next.content
+                            )
+                            i += 2
+                        }
+                        else -> {
+                            // Результат ещё не пришёл (стриминг)
+                            ToolCallBlock(
+                                toolName = block.toolName ?: "tool",
+                                input = block.content
+                            )
+                            i++
+                        }
                     }
                 }
                 ChatBlockType.TOOL_RESULT -> {
-                    // Осиротевший результат (не должно случаться, но страхуемся)
-                    ToolResultBlock(result = block.content)
+                    // Уже показан вместе со своим TOOL_USE выше — не рисуем повторно.
+                    if (i !in consumedResultIndices) {
+                        ToolResultBlock(result = block.content)
+                    }
                     i++
                 }
                 ChatBlockType.IMAGE -> {

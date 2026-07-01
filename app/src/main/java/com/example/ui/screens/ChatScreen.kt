@@ -186,11 +186,27 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(messages.size) {
+    // Сигнал "контент последнего сообщения изменился" — во время стриминга
+    // messages.size не меняется (токены дописываются мутацией того же
+    // SnapshotStateList<ChatBlock>), поэтому ключить автоскролл только на
+    // messages.size недостаточно: докрутка происходила один раз при появлении
+    // пустого пузыря ассистента и дальше не следовала за новым текстом.
+    // Читаем суммарную длину контента последнего сообщения — это регистрирует
+    // snapshot-зависимость от мутаций blocks и пересчитывается на каждый токен.
+    val lastMessageContentLength by remember(messages) {
+        derivedStateOf { messages.lastOrNull()?.blocks?.sumOf { it.content.length } ?: 0 }
+    }
+
+    LaunchedEffect(messages.size, lastMessageContentLength) {
         if (!isStreaming && !scrollToBottom) return@LaunchedEffect
-        if (autoFollow || scrollToBottom) {
+        if (scrollToBottom) {
+            // Явный запрос (отправка сообщения/переход в стримящую сессию) — с анимацией.
             listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
             scrollToBottom = false
+        } else if (autoFollow) {
+            // Догоняем каждый новый токен без анимации — иначе на длинных
+            // ответах успевает накопиться очередь из animateScrollToItem.
+            listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1)
         }
     }
 
@@ -262,8 +278,12 @@ fun ChatScreen(
                             attachmentsState = attachmentsState + att
                             scope.launch {
                                 try {
-                                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                                        ?: throw Exception("Cannot read file")
+                                    // Читаем байты файла на IO-диспетчере — на главном потоке
+                                    // это может подвесить UI на крупных файлах/фото с камеры.
+                                    val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                                            ?: throw Exception("Cannot read file")
+                                    }
                                     val result = viewModel.uploadFile(sid, name, mime, bytes)
                                     attachmentsState = attachmentsState.map {
                                         if (it.id == att.id) it.copy(isUploading = false, uploadResult = result) else it
