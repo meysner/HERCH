@@ -151,7 +151,17 @@ fun UserMessageBubble(
                 shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp),
                 modifier = Modifier.widthIn(max = 280.dp)
             ) {
-                Column(modifier = Modifier.padding(12.dp, 10.dp)) {
+                // Раньше здесь был Column(Modifier.padding(12.dp, 10.dp)) с
+                // единым паддингом на ВСЕ блоки, включая IMAGE, у которой
+                // сверху ещё был свой .clip(RoundedCornerShape(8.dp)) — радиус
+                // меньше, чем у самого пузыря (18.dp). Из-за этого несовпадения
+                // паддинг + два разных радиуса скругления серый фон Surface
+                // просвечивал по краям картинки, особенно в верхних углах —
+                // тот самый визуальный баг с серым фоном. Теперь паддинг
+                // применяется только к текстовым блокам, а изображение идёт
+                // "в край" пузыря без своего clip — Surface уже сам обрезает
+                // содержимое по своей форме, так что углы совпадают идеально.
+                Column {
                     msg.blocks.forEach { block ->
                         when (block.type) {
                             ChatBlockType.TEXT -> MarkdownText(
@@ -161,6 +171,17 @@ fun UserMessageBubble(
                                     fontSize = 16.sp,
                                     lineHeight = 24.sp
                                 ),
+                                // Дефолтный фон инлайн-кода (`` `text` ``) у
+                                // библиотеки MarkdownText — светло-серый,
+                                // рассчитан на светлую тему. На нашей тёмной
+                                // теме это давало плоские серые прямоугольники,
+                                // визуально выпадающие из дизайна (виден на
+                                // "control"/"option/win"/"command/alt" в
+                                // ответах модели). Задаём цвета явно, в тон
+                                // остальным тёмным поверхностям пузыря.
+                                syntaxHighlightColor = Color(0xFF2C2C2C),
+                                syntaxHighlightTextColor = Color(0xFFE0E0E0),
+                                modifier = Modifier.padding(12.dp, 10.dp),
                                 isTextSelectable = true
                             )
                             ChatBlockType.IMAGE -> block.imageUrl?.let { url ->
@@ -168,10 +189,7 @@ fun UserMessageBubble(
                                 AsyncImage(
                                     model = fullUrl,
                                     contentDescription = "Attached image",
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp)
-                                        .clip(RoundedCornerShape(8.dp)),
+                                    modifier = Modifier.fillMaxWidth(),
                                     contentScale = ContentScale.FillWidth
                                 )
                             }
@@ -230,6 +248,11 @@ fun AssistantMessageBubble(
                             fontSize = 16.sp,
                             lineHeight = 24.sp
                         ),
+                        // См. комментарий в UserMessageBubble: дефолтный
+                        // светло-серый фон инлайн-кода библиотеки не подходит
+                        // под тёмную тему — задаём цвета явно.
+                        syntaxHighlightColor = Color(0xFF2C2C2C),
+                        syntaxHighlightTextColor = Color(0xFFE0E0E0),
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                         isTextSelectable = true
                     )
