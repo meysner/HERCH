@@ -3,11 +3,16 @@ package com.example.ui.components
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,10 +34,62 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import com.example.data.ChatBlockType
 import com.example.data.ChatMessageItem
 import dev.jeziellago.compose.markdowntext.MarkdownText
+
+// Плейсхолдер-скелетон для картинок в чате: пока Coil грузит вложение
+// (особенно /api/file/raw с сервера — там реальная сетевая загрузка, а не
+// мгновенный локальный content://), вместо пустого места/скачка layout'а
+// показываем пульсирующий тёмный прямоугольник. При ошибке загрузки (файл
+// удалён, 404 и т.п.) показываем иконку "битой картинки" вместо вечного
+// скелетона или пустоты.
+@Composable
+private fun ImageSkeleton(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "image_skeleton")
+    val alpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.75f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(700, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "image_skeleton_alpha",
+    )
+    Box(modifier = modifier.background(Color(0xFF3A3A3A).copy(alpha = alpha)))
+}
+
+@Composable
+private fun ChatImageWithSkeleton(
+    url: String,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+    skeletonHeight: androidx.compose.ui.unit.Dp = 180.dp,
+) {
+    SubcomposeAsyncImage(
+        model = url,
+        contentDescription = contentDescription,
+        modifier = modifier,
+        contentScale = ContentScale.FillWidth,
+        loading = { ImageSkeleton(modifier = Modifier.fillMaxWidth().height(skeletonHeight)) },
+        error = {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(skeletonHeight)
+                    .background(Color(0xFF3A3A3A)),
+                contentAlignment = Alignment.Center,
+            ) {
+                // Icons.Outlined.BrokenImage не гарантированно есть во всех
+                // версиях material-icons-extended — не хотим ловить
+                // unresolved reference на сборке из-за декоративной иконки
+                // ошибки, поэтому просто текстовый символ.
+                Text("🖼", fontSize = 28.sp, color = Color(0xFF888888))
+            }
+        },
+    )
+}
 
 @Composable
 fun HeightCachingItem(
@@ -186,11 +243,10 @@ fun UserMessageBubble(
                             )
                             ChatBlockType.IMAGE -> block.imageUrl?.let { url ->
                                 val fullUrl = if (url.startsWith("/")) "$baseUrl$url" else url
-                                AsyncImage(
-                                    model = fullUrl,
+                                ChatImageWithSkeleton(
+                                    url = fullUrl,
                                     contentDescription = "Attached image",
                                     modifier = Modifier.fillMaxWidth(),
-                                    contentScale = ContentScale.FillWidth
                                 )
                             }
                             else -> {}
@@ -307,14 +363,13 @@ fun AssistantMessageBubble(
                 ChatBlockType.IMAGE -> {
                     block.imageUrl?.let { url ->
                         val fullUrl = if (url.startsWith("/")) "$baseUrl$url" else url
-                        AsyncImage(
-                            model = fullUrl,
+                        ChatImageWithSkeleton(
+                            url = fullUrl,
                             contentDescription = "Generated image",
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 4.dp, vertical = 4.dp)
                                 .clip(RoundedCornerShape(8.dp)),
-                            contentScale = ContentScale.FillWidth
                         )
                     }
                     i++
