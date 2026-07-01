@@ -72,6 +72,9 @@ fun ChatBottomBar(
     onComposerTextChange: (String) -> Unit,
     onSend: (String) -> Unit,
     isStreaming: Boolean = false,
+    // Состояние индикатора HERCH (ДНК-реверс/радар/tool use/ДНК-анализ) — считает ChatScreen
+    // по текущей фазе стрима (ожидание/reasoning/tool_use/текст).
+    logoState: HerchLogoState = HerchLogoState.IDLE,
     onStop: () -> Unit = {},
     isEnabled: Boolean = true,
     // Уровень reasoning — hoisted state, владеет ChatScreen (сохраняется per-session)
@@ -385,7 +388,7 @@ fun ChatBottomBar(
                 ) {
                     HerchLogo(
                         modifier = Modifier.width(64.dp).height(16.dp),
-                        isProcessing = isStreaming,
+                        state = logoState,
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Row(

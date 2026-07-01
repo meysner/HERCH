@@ -44,6 +44,7 @@ import com.example.SessionViewModel
 import com.example.data.MobileSession
 import com.example.ui.components.DrawerMenuItem
 import com.example.ui.components.HerchLogo
+import com.example.ui.components.HerchLogoState
 import com.example.ui.components.PullDownRefresh
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -139,9 +140,12 @@ fun AppMenuScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     HerchLogo(
-                        modifier     = Modifier.width(180.dp).height(50.dp),
-                        isLoading    = isLoading,
-                        isProcessing = hasInflight,
+                        modifier = Modifier.width(180.dp).height(50.dp),
+                        state = when {
+                            hasInflight -> HerchLogoState.REASONING
+                            isLoading   -> HerchLogoState.LOADING
+                            else        -> HerchLogoState.IDLE
+                        },
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onLogout) {

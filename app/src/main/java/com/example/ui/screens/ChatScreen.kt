@@ -85,6 +85,25 @@ fun ChatScreen(
     val currentModel = viewModel.currentModel
     val currentWorkspace = viewModel.currentWorkspace
 
+    // Состояние индикатора HERCH в нижней панели: смотрим на последний блок последнего
+    // (стримящегося) сообщения ассистента, чтобы понять текущую фазу ответа.
+    // Без remember(...) — messages/isStreaming уже сами по себе Compose-состояния,
+    // а remember с key=messages не всегда перевычислится при in-place мутации списка.
+    val herchLogoState = if (!isStreaming) {
+        HerchLogoState.IDLE
+    } else {
+        val lastMsg = messages.lastOrNull()
+        val lastBlock = lastMsg?.takeIf { it.role == "assistant" }?.blocks?.lastOrNull()
+        when (lastBlock?.type) {
+            null                      -> HerchLogoState.WAITING   // отправили, ответ ещё не пришёл — ДНК (реверс)
+            ChatBlockType.THINKING    -> HerchLogoState.REASONING // рассуждения — РАДАР (поиск)
+            ChatBlockType.TOOL_USE    -> HerchLogoState.TOOL_USE  // вызов инструмента — TOOL USE (обработка)
+            ChatBlockType.TOOL_RESULT -> HerchLogoState.WAITING   // результат получен, ждём продолжения ответа
+            ChatBlockType.TEXT        -> HerchLogoState.WRITING   // пишет прямо в чат — ДНК (анализ)
+            ChatBlockType.IMAGE       -> HerchLogoState.WRITING
+        }
+    }
+
     val baseUrl = remember { viewModel.getBaseUrl() }
 
     // Локальные состояния UI
@@ -338,6 +357,7 @@ fun ChatScreen(
                         scrollToBottom = true
                     },
                     isStreaming = isStreaming,
+                    logoState = herchLogoState,
                     onStop = {
                         viewModel.cancelCurrentStream()
                     },

@@ -305,6 +305,50 @@ class HermesApiClient(
                         if (text.isNotBlank()) blocks.add(ChatBlock(ChatBlockType.TEXT, text))
                     }
 
+                    // Вложения-картинки: сервер не кладёт их в content[] как
+                    // image_url (там только текст ассистента/пользователя),
+                    // а хранит отдельно в msg.attachments. Формат этого поля
+                    // ДВОЯКИЙ в зависимости от бэкенда/момента сохранения:
+                    //  1) объект {name, path, mime, is_image} — как пишет
+                    //     api/gateway_chat.py и первичный eager-чекпойнт
+                    //     (_checkpoint_user_message_for_eager_session_save);
+                    //  2) простая строка-имя файла — этим ПЕРЕЗАПИСЫВАЕТСЯ
+                    //     m['attachments'] в основном (не-gateway) потоке по
+                    //     завершении хода, см. api/streaming.py:
+                    //     `display_attachments = [_attachment_name(a) ...]`
+                    //     затем `m['attachments'] = display_attachments`.
+                    //     Т.е. is_image/mime теряются уже к концу стрима —
+                    //     остаётся только имя файла.
+                    // Поэтому если is_image не пришёл явно, картинку определяем
+                    // по расширению файла (тот же набор, что и в
+                    // WorkspaceBrowser.kt IMAGE_EXTENSIONS).
+                    // Реальные байты отдаёт существующий эндпоинт
+                    // /api/file/raw?session_id=&path=<имя файла в inbox сессии>
+                    // (используется, например, в downloadFileTo).
+                    val attachmentsArr = msg.optJSONArray("attachments")
+                    if (attachmentsArr != null) {
+                        for (j in 0 until attachmentsArr.length()) {
+                            val raw = attachmentsArr.opt(j) ?: continue
+                            val name: String
+                            var explicitIsImage: Boolean? = null
+                            if (raw is JSONObject) {
+                                name = raw.optString("name").ifBlank { raw.optString("filename") }
+                                    .ifBlank { raw.optString("path").substringAfterLast('/') }
+                                if (raw.has("is_image")) explicitIsImage = raw.optBoolean("is_image")
+                            } else {
+                                name = raw.toString().substringAfterLast('/')
+                            }
+                            if (name.isBlank()) continue
+                            val ext = name.substringAfterLast('.', "").lowercase()
+                            val looksLikeImage = explicitIsImage
+                                ?: (ext in setOf("jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif"))
+                            if (!looksLikeImage) continue
+                            val url = "$baseUrl/api/file/raw?session_id=$sessionId&path=" +
+                                URLEncoder.encode(name, "UTF-8")
+                            blocks.add(ChatBlock(ChatBlockType.IMAGE, content = "", imageUrl = url))
+                        }
+                    }
+
                     val toolCallsArr = msg.optJSONArray("tool_calls")
                     if (toolCallsArr != null) {
                         for (j in 0 until toolCallsArr.length()) {
