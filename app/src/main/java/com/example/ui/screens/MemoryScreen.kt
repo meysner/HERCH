@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -29,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.MemoryData
 import com.example.network.HermesApiClient
+import com.example.ui.components.PullDownRefresh
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -60,8 +62,10 @@ fun MemoryScreen(
     var memoryData by remember { mutableStateOf<MemoryData?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    val scrollState = rememberScrollState()
 
     fun loadMemory() {
+        if (isLoading) return
         scope.launch {
             isLoading = true
             errorMessage = ""
@@ -75,38 +79,36 @@ fun MemoryScreen(
     }
 
     LaunchedEffect(Unit) { loadMemory() }
+    BackHandler(onBack = onBack)
 
-    Scaffold(
-        containerColor = Color.Black,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text("Memory", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = Color.White)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { loadMemory() }, enabled = !isLoading) {
-                        if (isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
-                        } else {
-                            Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", tint = Color.White)
+    PullDownRefresh(
+        isRefreshing = isLoading,
+        onRefresh = { loadMemory() },
+        canPullDown = { scrollState.value == 0 },
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Scaffold(
+            containerColor = Color.Black,
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text("Memory", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = Color.White)
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black),
-                modifier = Modifier.statusBarsPadding()
-            )
-        },
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black),
+                    modifier = Modifier.statusBarsPadding()
+                )
+            },
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
             when {
                 isLoading && memoryData == null -> {
                     CircularProgressIndicator(
@@ -127,7 +129,7 @@ fun MemoryScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
+                            .verticalScroll(scrollState)
                             .navigationBarsPadding()
                             .padding(horizontal = 16.dp, vertical = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -172,6 +174,7 @@ fun MemoryScreen(
                         )
                     }
                 }
+            }
             }
         }
     }

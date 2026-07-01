@@ -93,6 +93,7 @@ fun ChatScreen(
     var currentReasoningLevel by remember { mutableStateOf(ReasoningLevel.NONE) }
     var showModelSheet by remember { mutableStateOf(false) }
     var showWorkspaceSheet by remember { mutableStateOf(false) }
+    var showProfileSheet by remember { mutableStateOf(false) }
     var showWorkspaceBrowser by remember { mutableStateOf(false) }
     var showAddWorkspaceDialog by remember { mutableStateOf(false) }
     var newWorkspacePath by remember { mutableStateOf("") }
@@ -113,11 +114,12 @@ fun ChatScreen(
         }
     }
 
-    // Черновик: восстанавливаем при смене сессии
+    // Черновик + reasoning level: восстанавливаем при смене сессии
     LaunchedEffect(session?.sessionId) {
         attachmentsState = emptyList()
         session?.sessionId?.let { sid ->
             composerText = viewModel.getDraft(sid)
+            currentReasoningLevel = viewModel.getReasoningLevel(sid)
         }
     }
 
@@ -125,6 +127,32 @@ fun ChatScreen(
     LaunchedEffect(composerText) {
         session?.sessionId?.let { sid ->
             viewModel.saveDraft(sid, composerText)
+        }
+    }
+
+    // При смене модели/завершении загрузки статуса reasoning:
+    // сбрасываем уровень если (а) модель не поддерживает, или (б) выбранный
+    // уровень отсутствует в списке supportedEfforts от сервера.
+    LaunchedEffect(viewModel.supportsReasoning, viewModel.reasoningStatusLoading, viewModel.supportedReasoningEfforts) {
+        if (viewModel.reasoningStatusLoading) return@LaunchedEffect
+        if (!viewModel.supportsReasoning) {
+            currentReasoningLevel = ReasoningLevel.NONE
+            return@LaunchedEffect
+        }
+        // Если текущий уровень не входит в список поддерживаемых — сбрасываем
+        val effortForLevel = mapOf(
+            ReasoningLevel.LOW to "low",
+            ReasoningLevel.MEDIUM to "medium",
+            ReasoningLevel.HIGH to "high",
+            ReasoningLevel.EXTRA_HIGH to "xhigh",
+        )
+        val efforts = viewModel.supportedReasoningEfforts
+        if (efforts.isNotEmpty() && currentReasoningLevel != ReasoningLevel.NONE) {
+            val currentEffort = effortForLevel[currentReasoningLevel]
+            if (currentEffort != null && currentEffort !in efforts) {
+                currentReasoningLevel = ReasoningLevel.NONE
+                session?.sessionId?.let { viewModel.saveReasoningLevel(it, ReasoningLevel.NONE) }
+            }
         }
     }
 
@@ -178,23 +206,14 @@ fun ChatScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column {
-                        Text(
-                            text = session?.title ?: "New chat",
-                            fontSize = 17.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Text(
-                            text = session?.let { sessionMeta(it) } ?: "Choose or create a session",
-                            fontSize = 13.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = Color(0xFFAAAAAA)
-                        )
-                    }
+                    Text(
+                        text = session?.title ?: "New chat",
+                        fontSize = 17.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 },
                 navigationIcon = {
                     IconButton(onClick = onOpenDrawer) {
@@ -224,12 +243,6 @@ fun ChatScreen(
                             .padding(horizontal = 20.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(12.dp),
-                            strokeWidth = 1.5.dp,
-                            color = Color(0xFFFFD700)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
                         Text("Hermes is thinking...", color = Color(0xFF888888), fontSize = 13.sp)
                     }
                 }
@@ -237,6 +250,7 @@ fun ChatScreen(
                     sessionId = session?.sessionId,
                     selectedModel = currentModel,
                     selectedWorkspace = currentWorkspace,
+                    reasoningLevel = currentReasoningLevel,
                     attachments = attachmentsState,
                     onModelClick = { showModelSheet = true },
                     onWorkspaceClick = { showWorkspaceSheet = true },
@@ -268,6 +282,7 @@ fun ChatScreen(
                     composerText = composerText,
                     onComposerTextChange = { composerText = it },
                     onSend = { text ->
+                        keyboardController?.hide()
                         val uploadedJson = attachmentsState.mapNotNull { it.uploadResult }.map { json ->
                             JSONObject().apply {
                                 put("name", json.optString("filename"))
@@ -301,7 +316,17 @@ fun ChatScreen(
                         viewModel.cancelCurrentStream()
                     },
                     isEnabled = pendingApproval == null && pendingClarify == null,
-                    onReasoningLevelChange = { currentReasoningLevel = it }
+                    onReasoningLevelChange = { level ->
+                        currentReasoningLevel = level
+                        session?.sessionId?.let { viewModel.saveReasoningLevel(it, level) }
+                    },
+                    supportsReasoning = viewModel.supportsReasoning && !viewModel.reasoningStatusLoading,
+                    supportedEfforts = viewModel.supportedReasoningEfforts,
+                    activeProfileName = viewModel.activeProfileName,
+                    onProfileClick = {
+                        viewModel.loadProfiles()
+                        showProfileSheet = true
+                    },
                 )
             }
         },
@@ -387,8 +412,17 @@ fun ChatScreen(
         ModelSelectionSheet(
             models = availableModels,
             selectedModel = currentModel,
-            onModelSelected = { it?.let { m -> viewModel.setModel(m) } },
+            onModelSelected = { m -> if (m != null) viewModel.setModel(m) else viewModel.resetModel() },
             onDismiss = { showModelSheet = false }
+        )
+    }
+
+    if (showProfileSheet) {
+        ProfileSelectionSheet(
+            profiles = viewModel.profiles,
+            activeProfileName = viewModel.activeProfileName,
+            onProfileSelected = { profile -> viewModel.switchProfile(profile.name) },
+            onDismiss = { showProfileSheet = false }
         )
     }
 

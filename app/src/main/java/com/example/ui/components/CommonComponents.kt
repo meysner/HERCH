@@ -77,27 +77,22 @@ fun DrawerMenuItem(
 enum class ReasoningLevel { NONE, LOW, MEDIUM, HIGH, EXTRA_HIGH }
 
 @Composable
-fun ReasoningBars(level: ReasoningLevel) {
-    val isExtraHigh = level == ReasoningLevel.EXTRA_HIGH
-    val activeColor = if (isExtraHigh) Color(0xFFAB7FF5) else Color(0xFFCCCCCC)
-    val inactiveColor = Color(0xFF444444)
-
-    val bar1 = if (level != ReasoningLevel.NONE) activeColor else inactiveColor
-    val bar2 = if (level == ReasoningLevel.MEDIUM || level == ReasoningLevel.HIGH || isExtraHigh) activeColor else inactiveColor
-    val bar3 = if (level == ReasoningLevel.HIGH || isExtraHigh) activeColor else inactiveColor
-
-    Row(
-        verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(2.dp)
-    ) {
-        Box(modifier = Modifier.width(3.dp).height(8.dp).clip(RoundedCornerShape(1.5.dp)).background(bar1))
-        Box(modifier = Modifier.width(3.dp).height(12.dp).clip(RoundedCornerShape(1.5.dp)).background(bar2))
-        Box(modifier = Modifier.width(3.dp).height(16.dp).clip(RoundedCornerShape(1.5.dp)).background(bar3))
-    }
-}
-
-@Composable
 fun ReasoningButton(level: ReasoningLevel, onClick: () -> Unit) {
+    val isActive = level != ReasoningLevel.NONE
+    val label = when (level) {
+        ReasoningLevel.NONE -> "think"
+        ReasoningLevel.LOW -> "low"
+        ReasoningLevel.MEDIUM -> "medium"
+        ReasoningLevel.HIGH -> "high"
+        ReasoningLevel.EXTRA_HIGH -> "max"
+    }
+    val iconTint = if (level == ReasoningLevel.EXTRA_HIGH) Color(0xFFAB7FF5)
+                   else if (isActive) Color(0xFFCCCCCC)
+                   else Color(0xFF888888)
+    val textColor = if (level == ReasoningLevel.EXTRA_HIGH) Color(0xFFAB7FF5)
+                    else if (isActive) Color(0xFFCCCCCC)
+                    else Color(0xFF888888)
+
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
@@ -107,16 +102,21 @@ fun ReasoningButton(level: ReasoningLevel, onClick: () -> Unit) {
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            val iconTint = if (level == ReasoningLevel.EXTRA_HIGH) Color(0xFFAB7FF5) else Color(0xFF888888)
             Icon(
                 Icons.Outlined.Psychology,
                 contentDescription = "Reasoning",
                 tint = iconTint,
                 modifier = Modifier.size(18.dp)
             )
-            ReasoningBars(level)
+            if (isActive) {
+                Text(
+                    text = label,
+                    color = textColor,
+                    fontSize = 13.sp,
+                )
+            }
         }
     }
 }

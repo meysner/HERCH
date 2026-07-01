@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.InsightsData
 import com.example.network.HermesApiClient
+import com.example.ui.components.PullDownRefresh
 import kotlinx.coroutines.launch
 
 private fun formatTokens(n: Int): String {
@@ -42,8 +44,10 @@ fun StatsScreen(
     var insights by remember { mutableStateOf<InsightsData?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
+    val scrollState = rememberScrollState()
 
     fun loadInsights() {
+        if (isLoading) return
         scope.launch {
             isLoading = true
             errorMessage = ""
@@ -57,38 +61,36 @@ fun StatsScreen(
     }
 
     LaunchedEffect(Unit) { loadInsights() }
+    BackHandler(onBack = onBack)
 
-    Scaffold(
-        containerColor = Color.Black,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text("Stats", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = Color.White)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { loadInsights() }, enabled = !isLoading) {
-                        if (isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp, color = Color.White)
-                        } else {
-                            Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", tint = Color.White)
+    PullDownRefresh(
+        isRefreshing = isLoading,
+        onRefresh = { loadInsights() },
+        canPullDown = { scrollState.value == 0 },
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Scaffold(
+            containerColor = Color.Black,
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text("Stats", fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = Color.White)
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black),
-                modifier = Modifier.statusBarsPadding()
-            )
-        }
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-        ) {
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Black),
+                    modifier = Modifier.statusBarsPadding()
+                )
+            }
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
             when {
                 isLoading && insights == null -> {
                     CircularProgressIndicator(
@@ -105,24 +107,27 @@ fun StatsScreen(
                     )
                 }
                 else -> {
-                    val data = insights ?: return@Box
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .navigationBarsPadding()
-                            .padding(horizontal = 16.dp, vertical = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        if (errorMessage.isNotBlank()) {
-                            Text(errorMessage, color = Color(0xFFFF6B6B), fontSize = 13.sp)
-                        }
+                    val data = insights
+                    if (data != null) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(scrollState)
+                                .navigationBarsPadding()
+                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            if (errorMessage.isNotBlank()) {
+                                Text(errorMessage, color = Color(0xFFFF6B6B), fontSize = 13.sp)
+                            }
 
-                        OverviewCard(data)
-                        TokensCard(data)
-                        ModelsCard(data)
+                            OverviewCard(data)
+                            TokensCard(data)
+                            ModelsCard(data)
+                        }
                     }
                 }
+            }
             }
         }
     }

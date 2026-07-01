@@ -72,9 +72,16 @@ fun ChatBottomBar(
     isStreaming: Boolean = false,
     onStop: () -> Unit = {},
     isEnabled: Boolean = true,
+    // Уровень reasoning — hoisted state, владеет ChatScreen (сохраняется per-session)
+    reasoningLevel: ReasoningLevel = ReasoningLevel.NONE,
     onReasoningLevelChange: (ReasoningLevel) -> Unit = {},
+    supportsReasoning: Boolean = true,
+    // Список уровней от сервера — определяет порядок циклизации
+    supportedEfforts: List<String> = emptyList(),
+    // Профили
+    activeProfileName: String? = null,
+    onProfileClick: () -> Unit = {},
 ) {
-    var reasoningLevel by remember { mutableStateOf(ReasoningLevel.NONE) }
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     var showAttachMenu by remember { mutableStateOf(false) }
 
@@ -101,13 +108,37 @@ fun ChatBottomBar(
     val canSend = !isStreaming && !isUploadingAny && isEnabled &&
             (composerText.isNotBlank() || attachments.isNotEmpty())
 
+    // Порядок уровней. Если сервер прислал список — используем его,
+    // иначе fallback на всю последовательность (fail-open).
+    val effortToLevel = mapOf(
+        "low" to ReasoningLevel.LOW,
+        "medium" to ReasoningLevel.MEDIUM,
+        "high" to ReasoningLevel.HIGH,
+        "xhigh" to ReasoningLevel.EXTRA_HIGH,
+    )
+    val levelToEffort = mapOf(
+        ReasoningLevel.LOW to "low",
+        ReasoningLevel.MEDIUM to "medium",
+        ReasoningLevel.HIGH to "high",
+        ReasoningLevel.EXTRA_HIGH to "xhigh",
+    )
+    val orderedLevels: List<ReasoningLevel> = run {
+        val fullOrder = listOf("low", "medium", "high", "xhigh")
+        val filtered = if (supportedEfforts.isEmpty()) fullOrder
+                       else fullOrder.filter { it in supportedEfforts }
+        filtered.mapNotNull { effortToLevel[it] }
+    }
+    var reasoningState by remember(reasoningLevel) { mutableStateOf(reasoningLevel) }
+    LaunchedEffect(reasoningLevel) {
+        reasoningState = reasoningLevel
+    }
     val nextLevel = { current: ReasoningLevel ->
-        when (current) {
-            ReasoningLevel.NONE -> ReasoningLevel.LOW
-            ReasoningLevel.LOW -> ReasoningLevel.MEDIUM
-            ReasoningLevel.MEDIUM -> ReasoningLevel.HIGH
-            ReasoningLevel.HIGH -> ReasoningLevel.EXTRA_HIGH
-            ReasoningLevel.EXTRA_HIGH -> ReasoningLevel.NONE
+        if (current == ReasoningLevel.NONE) {
+            orderedLevels.firstOrNull() ?: ReasoningLevel.NONE
+        } else {
+            val idx = orderedLevels.indexOf(current)
+            if (idx == -1 || idx == orderedLevels.lastIndex) ReasoningLevel.NONE
+            else orderedLevels[idx + 1]
         }
     }
 
@@ -271,14 +302,20 @@ fun ChatBottomBar(
                         }
                     }
 
-                    // Reasoning
-                    ReasoningButton(
-                        level = reasoningLevel,
-                        onClick = {
-                            reasoningLevel = nextLevel(reasoningLevel)
-                            onReasoningLevelChange(reasoningLevel)
-                        },
-                    )
+                    // Reasoning — показываем только если модель поддерживает
+                    AnimatedVisibility(
+                        visible = supportsReasoning,
+                        enter = fadeIn(tween(200)),
+                        exit = fadeOut(tween(150)),
+                    ) {
+                        ReasoningButton(
+                            level = reasoningState,
+                            onClick = {
+                                reasoningState = nextLevel(reasoningState)
+                                onReasoningLevelChange(reasoningState)
+                            },
+                        )
+                    }
                 }
 
                 // Кнопка отправки / стоп
@@ -339,6 +376,11 @@ fun ChatBottomBar(
                         .padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    HerchLogo(
+                        modifier = Modifier.width(64.dp).height(16.dp),
+                        isProcessing = isStreaming,
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -376,7 +418,7 @@ fun ChatBottomBar(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .clickable { }
+                            .clickable { onProfileClick() }
                             .padding(4.dp),
                     ) {
                         Icon(
@@ -386,7 +428,14 @@ fun ChatBottomBar(
                             modifier = Modifier.size(16.dp),
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Profile", color = Color(0xFF888888), fontSize = 13.sp)
+                        Text(
+                            text = activeProfileName ?: "Profile",
+                            color = Color(0xFF888888),
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 90.dp),
+                        )
                         Spacer(modifier = Modifier.width(4.dp))
                         Icon(
                             Icons.Filled.KeyboardArrowDown,

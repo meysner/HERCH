@@ -14,9 +14,11 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -28,10 +30,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.graphicsLayer
+import com.example.data.ProfileInfo
 import com.example.SessionViewModel
 import com.example.data.MobileSession
 import com.example.ui.components.DrawerMenuItem
 import com.example.ui.components.HerchLogo
+import com.example.ui.components.PullDownRefresh
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -70,32 +83,55 @@ fun AppMenuScreen(
     onNavigateToChat: (MobileSession) -> Unit,
     onNavigateToMemory: () -> Unit,
     onNavigateToStats: () -> Unit,
+    onNavigateToTasks: () -> Unit,
     onLogout: () -> Unit,
 ) {
-    val sessions = viewModel.sessions
+    val sessions = viewModel.filteredSessions
     val isLoading = viewModel.sessionsLoading
     val isCreating = viewModel.isCreatingSession
     val errorMessage = viewModel.sessionsError
     val hasInflight = viewModel.inflightSessions.isNotEmpty()
 
+    var profilesExpanded by viewModel.profilesExpanded
+    var projectsExpanded by viewModel.projectsExpanded
     var sessionToManage by remember { mutableStateOf<MobileSession?>(null) }
+    
+    val profiles = viewModel.profiles
+    val activeProfileName = viewModel.activeProfileName
     var sessionToRename by remember { mutableStateOf<MobileSession?>(null) }
     var renameText by remember { mutableStateOf("") }
     var sessionToConfirmOpen by remember { mutableStateOf<MobileSession?>(null) }
+    val listState = rememberLazyListState()
 
-    Box(
+    // Загружаем профили и проекты при открытии меню
+    LaunchedEffect(Unit) {
+        viewModel.loadProfiles()
+        viewModel.loadProjects()
+    }
+
+    PullDownRefresh(
+        isRefreshing = isLoading,
+        onRefresh = {
+            if (!isLoading && !isCreating) viewModel.refreshSessions()
+        },
+        canPullDown = { !listState.canScrollBackward },
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
     ) {
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 24.dp),
-            contentPadding = PaddingValues(top = 48.dp, bottom = 100.dp)
+                .background(Color.Black)
         ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp),
+                contentPadding = PaddingValues(top = 48.dp, bottom = 100.dp)
+            ) {
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -108,26 +144,6 @@ fun AppMenuScreen(
                         isProcessing = hasInflight,
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = { viewModel.refreshSessions() },
-                            enabled = !isLoading && !isCreating
-                        ) {
-                            if (isLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(22.dp),
-                                    strokeWidth = 2.dp,
-                                    color = Color.White
-                                )
-                            } else {
-                                Icon(
-                                    Icons.Outlined.Refresh,
-                                    contentDescription = "Refresh",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(26.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(16.dp))
                         IconButton(onClick = onLogout) {
                             Icon(
                                 Icons.Outlined.Logout,
@@ -143,7 +159,228 @@ fun AppMenuScreen(
 
             item { DrawerMenuItem(icon = Icons.Outlined.Psychology, text = "Memory", onClick = onNavigateToMemory) }
             item { DrawerMenuItem(icon = Icons.Outlined.BarChart, text = "Stats", onClick = onNavigateToStats) }
+            item { DrawerMenuItem(icon = Icons.Outlined.EventNote, text = "Tasks", onClick = onNavigateToTasks) }
 
+            // ── Profile section ───────────────────────────────────────────
+            item {
+                val chevronRotation by animateFloatAsState(
+                    targetValue = if (profilesExpanded) 180f else 0f,
+                    animationSpec = androidx.compose.animation.core.tween(200, easing = FastOutSlowInEasing),
+                    label = "profileChevron"
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { profilesExpanded = !profilesExpanded }
+                        .padding(vertical = 14.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Outlined.AccountCircle,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Spacer(modifier = Modifier.width(20.dp))
+                    Text(
+                        text = "Profile",
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    // Активный профиль как подсказка когда свёрнуто
+                    if (!profilesExpanded && activeProfileName.isNotBlank()) {
+                        Text(
+                            text = activeProfileName,
+                            color = Color(0xFF888888),
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                    }
+                    Icon(
+                        Icons.Filled.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = Color(0xFF888888),
+                        modifier = Modifier.graphicsLayer { rotationZ = chevronRotation }
+                    )
+                }
+            }
+
+            // Список профилей — раскрывается под заголовком
+            if (profilesExpanded && profiles.isNotEmpty()) {
+                items(profiles, key = { "profile_${it.name}" }) { profile ->
+                    val isActive = profile.name == activeProfileName
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                if (!isActive) viewModel.switchProfile(profile.name)
+                            }
+                            .padding(start = 46.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (isActive) Color(0xFFFFD700) else Color(0xFF444444)
+                                )
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = profile.name,
+                                color = if (isActive) Color(0xFFFFD700) else Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                            )
+                            val meta = buildString {
+                                profile.model?.substringAfterLast('/')?.let { append(it) }
+                                if (profile.skillCount > 0) {
+                                    if (isNotEmpty()) append(" · ")
+                                    append("${profile.skillCount} skills")
+                                }
+                            }
+                            if (meta.isNotBlank()) {
+                                Text(text = meta, color = Color(0xFF666666), fontSize = 12.sp)
+                            }
+                        }
+                        if (isActive) {
+                            Icon(
+                                Icons.Outlined.Check,
+                                contentDescription = null,
+                                tint = Color(0xFFFFD700),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Разделитель перед Projects
+                item { Spacer(modifier = Modifier.height(8.dp)) }
+            }
+
+            // ── Projects section (по образцу Profile) ─────────────────────
+            // Фильтрует список сессий ниже; не отдельный экран.
+            item {
+                val projects = viewModel.projects
+                val activeProjectFilter = viewModel.activeProjectFilter
+                val activeProjectName = projects.firstOrNull { it.projectId == activeProjectFilter }?.name
+                val chevronRotation by animateFloatAsState(
+                    targetValue = if (projectsExpanded) 180f else 0f,
+                    animationSpec = androidx.compose.animation.core.tween(200, easing = FastOutSlowInEasing),
+                    label = "projectChevron"
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { projectsExpanded = !projectsExpanded }
+                        .padding(vertical = 14.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Outlined.Folder,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Spacer(modifier = Modifier.width(20.dp))
+                    Text(
+                        text = "Projects",
+                        color = Color.White,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    // Активный фильтр как подсказка когда свёрнуто
+                    if (!projectsExpanded && activeProjectName != null) {
+                        Text(
+                            text = activeProjectName,
+                            color = Color(0xFF888888),
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                    }
+                    Icon(
+                        Icons.Filled.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = Color(0xFF888888),
+                        modifier = Modifier.graphicsLayer { rotationZ = chevronRotation }
+                    )
+                }
+            }
+
+            // Список проектов-фильтров — раскрывается под заголовком.
+            // Показываем секцию, если есть хотя бы один проект.
+            if (projectsExpanded && viewModel.projects.isNotEmpty()) {
+                item {
+                    val isAllActive = viewModel.activeProjectFilter == null
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { viewModel.selectProjectFilter(null) }
+                            .padding(start = 46.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(if (isAllActive) Color(0xFFFFD700) else Color(0xFF444444))
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Text(
+                            text = "All sessions",
+                            color = if (isAllActive) Color(0xFFFFD700) else Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = if (isAllActive) FontWeight.SemiBold else FontWeight.Normal,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (isAllActive) {
+                            Icon(Icons.Outlined.Check, contentDescription = null, tint = Color(0xFFFFD700), modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+                items(viewModel.projects, key = { "project_${it.projectId}" }) { project ->
+                    val isActive = project.projectId == viewModel.activeProjectFilter
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { viewModel.selectProjectFilter(project.projectId) }
+                            .padding(start = 46.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(if (isActive) Color(0xFFFFD700) else Color(0xFF444444))
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Text(
+                            text = project.name,
+                            color = if (isActive) Color(0xFFFFD700) else Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (isActive) {
+                            Icon(Icons.Outlined.Check, contentDescription = null, tint = Color(0xFFFFD700), modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+
+                item { Spacer(modifier = Modifier.height(8.dp)) }
+            }
+
+            // ── Sessions header ───────────────────────────────────────────
             item {
                 Row(
                     modifier = Modifier
@@ -171,7 +408,7 @@ fun AppMenuScreen(
             if (sessions.isEmpty() && !isLoading) {
                 item {
                     Text(
-                        text = "No sessions yet",
+                        text = if (viewModel.activeProjectFilter != null) "No sessions in this project" else "No sessions yet",
                         color = Color(0xFF888888),
                         fontSize = 15.sp,
                         modifier = Modifier.padding(vertical = 12.dp)
@@ -289,6 +526,7 @@ fun AppMenuScreen(
                 Text("New chat", fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
         }
+    }
     }
 
     // ── Long-press bottom sheet ───────────────────────────────────────────

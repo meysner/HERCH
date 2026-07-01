@@ -8,6 +8,7 @@ import com.example.data.MobileSession
 import com.example.data.InsightsData
 import com.example.data.MemoryData
 import com.example.data.ModelInfo
+import com.example.data.ProfileInfo
 import com.example.data.ModelStats
 import com.example.data.NewSessionResult
 import com.example.data.SessionsResult
@@ -15,6 +16,7 @@ import com.example.data.WorkspaceEntry
 import com.example.ui.components.ReasoningLevel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -31,9 +33,9 @@ import okhttp3.sse.EventSources
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 
 /**
  * @param prefs используется только для чтения webui_url.
@@ -108,22 +110,40 @@ class HermesApiClient(
             val body = get("$baseUrl/api/models")
             val root = JSONObject(body)
             val groups = root.optJSONArray("groups") ?: JSONArray()
+            val seen = linkedSetOf<String>()
             buildList {
                 for (i in 0 until groups.length()) {
                     val group = groups.optJSONObject(i) ?: continue
                     val groupProvider = group.optString("provider", "")
-                    val models = group.optJSONArray("models") ?: continue
-                    for (j in 0 until models.length()) {
-                        val model = models.optJSONObject(j) ?: continue
-                        val id = model.optString("id")
-                        if (id.isNotBlank()) {
-                            val label = model.optString("label").ifBlank { id.substringAfterLast('/') }
-                            val provider = groupProvider.ifBlank {
-                                if (id.contains("/")) id.substringBefore('/') else ""
+                    val groupProviderId = group.optString("provider_id", "")
+                    listOf("models", "extra_models").forEach { bucket ->
+                        val models = group.optJSONArray(bucket) ?: return@forEach
+                        for (j in 0 until models.length()) {
+                            val model = models.optJSONObject(j) ?: continue
+                            val id = model.optString("id").trim()
+                            if (id.isNotBlank() && seen.add(id)) {
+                                val label = model.optString("label").ifBlank { id.substringAfterLast('/') }
+                                val provider = groupProviderId.ifBlank {
+                                    groupProvider.ifBlank {
+                                        when {
+                                            id.startsWith("@") && id.contains(":") -> id.substringAfter("@").substringBefore(":")
+                                            id.contains("/") -> id.substringBefore('/')
+                                            else -> ""
+                                        }
+                                    }
+                                }
+                                add(ModelInfo(id = id, label = label, provider = provider))
                             }
-                            add(ModelInfo(id = id, label = label, provider = provider))
                         }
                     }
+                }
+                val defaultModel = root.optString("default_model").trim()
+                if (defaultModel.isNotBlank() && seen.add(defaultModel)) {
+                    add(0, ModelInfo(
+                        id = defaultModel,
+                        label = defaultModel.substringAfterLast('/').substringAfterLast(':'),
+                        provider = root.optString("active_provider").ifBlank { "" },
+                    ))
                 }
             }
         }.getOrDefault(emptyList())
@@ -303,7 +323,6 @@ class HermesApiClient(
         model: String? = null,
         workspace: String? = null,
         attachments: List<JSONObject> = emptyList(),
-        reasoningLevel: ReasoningLevel = ReasoningLevel.NONE,
         onStreamStarted: (String) -> Unit,
         onToken: (String) -> Unit,
         onReasoning: (String) -> Unit,
@@ -358,20 +377,36 @@ class HermesApiClient(
 
         withContext(Dispatchers.Main) { onStreamStarted(streamId) }
 
-        val sseRequest = Request.Builder()
-            .url("$baseUrl/api/chat/stream?stream_id=$streamId")
-            .header("Accept", "text/event-stream")
-            .build()
-
         val sseClient = client.newBuilder()
             .readTimeout(5, TimeUnit.MINUTES)
             .build()
 
         val factory = EventSources.createFactory(sseClient)
 
-        suspendCancellableCoroutine { continuation ->
+        // Курсор реплея: последний увиденный SSE event_id вида "<stream_id>:<seq>"
+        // (см. api/routes.py::_handle_sse_stream -> _sse_with_id). Используется,
+        // если придётся переподключаться после обрыва соединения.
+        var lastEventId = ""
+        var lastSeq = 0L
+
+        // Открывает одно SSE-соединение и приостанавливает корутину до его
+        // штатного завершения (onClosed) либо обрыва (onFailure).
+        // Возвращает null при штатном завершении или текст ошибки при обрыве.
+        suspend fun connectOnce(url: String): String? = suspendCancellableCoroutine { continuation ->
+            val sseRequest = Request.Builder()
+                .url(url)
+                .header("Accept", "text/event-stream")
+                .build()
+
             val listener = object : EventSourceListener() {
                 override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
+                    if (!id.isNullOrBlank()) {
+                        lastEventId = id
+                        id.substringAfterLast(':').toLongOrNull()?.let { seq ->
+                            if (seq > lastSeq) lastSeq = seq
+                        }
+                    }
+
                     val eventType = type ?: "message"
                     if (data == "[DONE]") return
 
@@ -399,17 +434,12 @@ class HermesApiClient(
                 }
 
                 override fun onClosed(eventSource: EventSource) {
-                    if (continuation.isActive) {
-                        kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch { onDone() }
-                        continuation.resume(Unit)
-                    }
+                    if (continuation.isActive) continuation.resume(null)
                 }
 
                 override fun onFailure(eventSource: EventSource, t: Throwable?, response: okhttp3.Response?) {
                     if (continuation.isActive) {
-                        val errMsg = t?.message ?: "Stream connection lost"
-                        kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch { onError(errMsg) }
-                        continuation.resumeWithException(t ?: IOException(errMsg))
+                        continuation.resume(t?.message ?: "Stream connection lost")
                     }
                 }
             }
@@ -417,27 +447,192 @@ class HermesApiClient(
             val eventSource = factory.newEventSource(sseRequest, listener)
             continuation.invokeOnCancellation { eventSource.cancel() }
         }
+
+        val liveUrl = "$baseUrl/api/chat/stream?stream_id=$streamId"
+        var failure = connectOnce(liveUrl)
+
+        // Зеркалим логику веб-клиента (messages.js attachLiveStream/onerror):
+        // ровно одна попытка реконнекта. Сначала спрашиваем у сервера статус
+        // стрима -- если воркер ещё жив, просто продолжаем читать тот же
+        // живой поток; если воркер уже завершился, реплеим хвост из журнала
+        // запуска начиная с последнего увиденного event_id/seq, чтобы не
+        // потерять и не задублировать события.
+        if (failure != null) {
+            delay(1500)
+            val status = fetchStreamStatus(baseUrl, streamId)
+            val reconnectUrl = when {
+                status == null -> null
+                status.optBoolean("active", false) -> liveUrl
+                status.optBoolean("replay_available", false) -> {
+                    val afterId = URLEncoder.encode(lastEventId, "UTF-8")
+                    "$liveUrl&replay=1&after_seq=$lastSeq&after_event_id=$afterId"
+                }
+                else -> null
+            }
+            failure = if (reconnectUrl != null) connectOnce(reconnectUrl) else failure
+        }
+
+        withContext(Dispatchers.Main) {
+            if (failure == null) onDone() else onError(failure)
+        }
     }
 
-    suspend fun setReasoningEffort(level: ReasoningLevel) = withContext(Dispatchers.IO) {
-        runCatching {
-            val baseUrl = savedBaseUrl()
-            val effort = when (level) {
-                ReasoningLevel.NONE -> "none"
-                ReasoningLevel.LOW -> "low"
-                ReasoningLevel.MEDIUM -> "medium"
-                ReasoningLevel.HIGH -> "high"
-                ReasoningLevel.EXTRA_HIGH -> "xhigh"
-            }
-            val body = JSONObject().put("effort", effort).toString()
-            val request = Request.Builder()
-                .url("$baseUrl/api/reasoning")
-                .post(body.toRequestBody(jsonMediaType))
-                .build()
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw IOException("Failed to set reasoning effort")
+    /** Опрашивает /api/chat/stream/status: жив ли воркер и доступен ли replay из журнала. */
+    private suspend fun fetchStreamStatus(baseUrl: String, streamId: String): JSONObject? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val request = Request.Builder()
+                    .url("$baseUrl/api/chat/stream/status?stream_id=$streamId")
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@use null
+                    JSONObject(response.body?.string().orEmpty())
+                }
+            }.getOrNull()
+        }
+
+    /**
+     * Устанавливает уровень рассуждения на сервере.
+     * Возвращает Result.success(Unit) при успехе, Result.failure при исчерпании попыток.
+     *
+     * Retry-политика: до 3 попыток с экспоненциальным backoff (200ms -> 400ms).
+     * Только сетевые/IO ошибки повторяются; 4xx считается постоянной ошибкой.
+     */
+    suspend fun setReasoningEffort(level: ReasoningLevel): Result<Unit> = withContext(Dispatchers.IO) {
+        val effort = when (level) {
+            ReasoningLevel.NONE -> "none"
+            ReasoningLevel.LOW -> "low"
+            ReasoningLevel.MEDIUM -> "medium"
+            ReasoningLevel.HIGH -> "high"
+            ReasoningLevel.EXTRA_HIGH -> "xhigh"
+        }
+        val body = JSONObject().put("effort", effort).toString()
+        val maxAttempts = 3
+        var lastError: Throwable = IOException("Unknown error")
+        repeat(maxAttempts) { attempt ->
+            runCatching {
+                val request = Request.Builder()
+                    .url("${savedBaseUrl()}/api/reasoning")
+                    .post(body.toRequestBody(jsonMediaType))
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (response.code in 400..499) {
+                        // Клиентская ошибка — повторять бессмысленно
+                        throw IOException("Server rejected reasoning effort ($effort): HTTP ${response.code}")
+                    }
+                    if (!response.isSuccessful) {
+                        throw IOException("Failed to set reasoning effort: HTTP ${response.code}")
+                    }
+                }
+            }.onSuccess {
+                return@withContext Result.success(Unit)
+            }.onFailure { e ->
+                lastError = e
+                // 4xx — не ретраим
+                if (e is IOException && e.message?.contains("Server rejected") == true) {
+                    return@withContext Result.failure(e)
+                }
+                if (attempt < maxAttempts - 1) {
+                    delay(200L * (1 shl attempt)) // 200ms, 400ms
+                }
             }
         }
+        Result.failure(lastError)
+    }
+
+    /**
+     * Проверяет, поддерживает ли модель reasoning.
+     * Зеркало логики веб-фронтенда: GET /api/reasoning?model=X&provider=Y
+     * Возвращает Pair(supportsReasoning, supportedEfforts) или null при ошибке сети.
+     */
+    suspend fun getReasoningStatus(
+        modelId: String? = null,
+        provider: String? = null,
+    ): Pair<Boolean, List<String>>? = withContext(Dispatchers.IO) {
+        runCatching {
+            val baseUrl = savedBaseUrl()
+            val params = buildString {
+                if (!modelId.isNullOrBlank()) {
+                    append("model=")
+                    append(URLEncoder.encode(modelId, "UTF-8"))
+                }
+                if (!provider.isNullOrBlank()) {
+                    if (isNotEmpty()) append("&")
+                    append("provider=")
+                    append(URLEncoder.encode(provider, "UTF-8"))
+                }
+            }
+            val url = if (params.isNotEmpty()) "$baseUrl/api/reasoning?$params"
+                      else "$baseUrl/api/reasoning"
+            val request = Request.Builder().url(url).get().build()
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                val json = JSONObject(response.body?.string().orEmpty())
+                val supports = json.optBoolean("supports_reasoning_effort", false)
+                val effortsArr = json.optJSONArray("supported_efforts")
+                val efforts = if (effortsArr != null)
+                    List(effortsArr.length()) { effortsArr.getString(it) }
+                else emptyList()
+                Pair(supports, efforts)
+            }
+        }.getOrNull()
+    }
+
+    // ── Profiles ─────────────────────────────────────────────────────────
+
+    suspend fun getProfiles(): Pair<List<ProfileInfo>, String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val baseUrl = savedBaseUrl()
+            val req = Request.Builder().url("$baseUrl/api/profiles").get().build()
+            client.newCall(req).execute().use { resp ->
+                val body = JSONObject(resp.body?.string().orEmpty())
+                val active = body.optString("active", "default")
+                val arr = body.optJSONArray("profiles") ?: return@use Pair(emptyList(), active)
+                val list = List(arr.length()) { i ->
+                    val p = arr.getJSONObject(i)
+                    ProfileInfo(
+                        name = p.optString("name"),
+                        model = p.optString("model").ifBlank { null },
+                        provider = p.optString("provider").ifBlank { null },
+                        isActive = p.optBoolean("is_active"),
+                        isDefault = p.optBoolean("is_default"),
+                        skillCount = p.optInt("skill_count", 0),
+                        gatewayRunning = p.optBoolean("gateway_running"),
+                    )
+                }
+                Pair(list, active)
+            }
+        }.getOrDefault(Pair(emptyList(), "default"))
+    }
+
+    suspend fun switchProfile(name: String) = withContext(Dispatchers.IO) {
+        runCatching {
+            val baseUrl = savedBaseUrl()
+            val body = JSONObject().put("name", name).toString()
+            val req = Request.Builder()
+                .url("$baseUrl/api/profile/switch")
+                .post(body.toRequestBody(jsonMediaType))
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) throw IOException("Switch failed: ${resp.code}")
+            }
+        }
+    }
+
+    suspend fun getProjects(): List<com.example.data.ProjectInfo> = withContext(Dispatchers.IO) {
+        runCatching {
+            val baseUrl = savedBaseUrl()
+            val body = get("$baseUrl/api/projects")
+            val arr = JSONObject(body).optJSONArray("projects") ?: JSONArray()
+            List(arr.length()) { i ->
+                val p = arr.getJSONObject(i)
+                com.example.data.ProjectInfo(
+                    projectId = p.optString("project_id"),
+                    name = p.optString("name").ifBlank { "Untitled" },
+                    color = p.optString("color").ifBlank { null },
+                )
+            }.filter { it.projectId.isNotBlank() }
+        }.getOrDefault(emptyList())
     }
 
     suspend fun deleteSession(sessionId: String) = withContext(Dispatchers.IO) {
@@ -661,6 +856,54 @@ class HermesApiClient(
         )
     }
 
+    // ── Cron jobs ("Tasks") ─────────────────────────────────────────────
+    suspend fun listCronJobs(): List<com.example.data.CronJob> = withContext(Dispatchers.IO) {
+        runCatching {
+            val baseUrl = savedBaseUrl()
+            val body = get("$baseUrl/api/crons")
+            val arr = JSONObject(body).optJSONArray("jobs") ?: JSONArray()
+            List(arr.length()) { i -> arr.getJSONObject(i).toCronJob() }
+        }.getOrDefault(emptyList())
+    }
+
+    suspend fun runCronJob(jobId: String) = withContext(Dispatchers.IO) {
+        runCatching { postJobAction("${savedBaseUrl()}/api/crons/run", jobId) }
+    }
+
+    suspend fun pauseCronJob(jobId: String) = withContext(Dispatchers.IO) {
+        runCatching { postJobAction("${savedBaseUrl()}/api/crons/pause", jobId) }
+    }
+
+    suspend fun resumeCronJob(jobId: String) = withContext(Dispatchers.IO) {
+        runCatching { postJobAction("${savedBaseUrl()}/api/crons/resume", jobId) }
+    }
+
+    private fun postJobAction(url: String, jobId: String) {
+        val body = JSONObject().put("job_id", jobId).toString().toRequestBody(jsonMediaType)
+        val request = Request.Builder().url(url).post(body).build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw IOException(readError(response.code, response.body?.string()))
+        }
+    }
+
+    private fun JSONObject.toCronJob(): com.example.data.CronJob {
+        val schedule = optJSONObject("schedule")
+        return com.example.data.CronJob(
+            id = optString("id"),
+            name = optString("name").ifBlank { null },
+            scheduleDisplay = optString("schedule_display").ifBlank {
+                schedule?.optString("expression")?.ifBlank { null }
+            },
+            enabled = optBoolean("enabled", true),
+            state = optString("state").ifBlank { null },
+            nextRunAt = if (has("next_run_at") && !isNull("next_run_at")) optLong("next_run_at") else null,
+            lastRunAt = if (has("last_run_at") && !isNull("last_run_at")) optLong("last_run_at") else null,
+            lastStatus = optString("last_status").ifBlank { null },
+            lastError = optString("last_error").ifBlank { null },
+            prompt = optString("prompt").ifBlank { null },
+        )
+    }
+
     private fun savedBaseUrl(): String {
         val raw = prefs.getString("webui_url", "").orEmpty()
         val normalized = normalizeBaseUrl(raw)
@@ -696,6 +939,7 @@ class HermesApiClient(
                 has("messages") -> optJSONArray("messages")?.length()
                 else -> null
             },
+            projectId = optString("project_id").ifBlank { null },
         )
     }
 }

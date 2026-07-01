@@ -23,6 +23,7 @@ import com.example.ui.screens.ChatScreen
 import com.example.ui.screens.HermesLoginScreen
 import com.example.ui.screens.MemoryScreen
 import com.example.ui.screens.StatsScreen
+import com.example.ui.screens.TasksScreen
 import com.example.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.launch
 
@@ -36,26 +37,46 @@ sealed class Screen {
     object Chat : Screen()
     object Memory : Screen()
     object Stats : Screen()
+    object Tasks : Screen()
 }
 
 class MainActivity : ComponentActivity() {
+
+    private val prefs by lazy { getSharedPreferences(PREFS_NAME, MODE_PRIVATE) }
+    private val httpClient by lazy { com.example.di.AppModule.provideOkHttpClient(prefs) }
+
+    // ViewModel сохраняется как поле, чтобы onStart()/onStop() могли сообщать
+    // ей о переходах приложения в фон/на передний план -- см. isForeground /
+    // setForeground() в SessionViewModel и цикл поллинга в startPolling(),
+    // который спит в фоне вместо того чтобы бесполезно опрашивать сервер
+    // каждые 3 секунды и жечь батарею.
+    private val viewModel: SessionViewModel by viewModels {
+        SessionViewModel.Factory(prefs, httpClient)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        // Единственное место создания OkHttpClient — далее передаётся инжекцией
-        val httpClient = com.example.di.AppModule.provideOkHttpClient(prefs)
-
         setContent {
             MyApplicationTheme {
-                val viewModel: SessionViewModel by viewModels {
-                    SessionViewModel.Factory(prefs, httpClient)
-                }
                 HerchApp(viewModel = viewModel, prefs = prefs, httpClient = httpClient)
             }
         }
+    }
+
+    // onStart/onStop -- это переходы всего приложения между передним планом
+    // и фоном для single-Activity-приложения (единственная Activity в
+    // манифесте), поэтому ProcessLifecycleOwner тут не нужен: тот же сигнал,
+    // без дополнительной gradle-зависимости.
+    override fun onStart() {
+        super.onStart()
+        viewModel.setForeground(true)
+    }
+
+    override fun onStop() {
+        viewModel.setForeground(false)
+        super.onStop()
     }
 }
 
@@ -109,6 +130,7 @@ private fun HerchApp(
                     },
                     onNavigateToMemory = { currentScreen = Screen.Memory },
                     onNavigateToStats = { currentScreen = Screen.Stats },
+                    onNavigateToTasks = { currentScreen = Screen.Tasks },
                     onLogout = {
                         scope.launch {
                             val savedUrl = prefs.getString("webui_url", "").orEmpty()
@@ -137,6 +159,12 @@ private fun HerchApp(
             }
             is Screen.Stats -> {
                 StatsScreen(
+                    apiClient = remember { com.example.network.HermesApiClient(prefs, httpClient) },
+                    onBack = { currentScreen = Screen.Menu }
+                )
+            }
+            is Screen.Tasks -> {
+                TasksScreen(
                     apiClient = remember { com.example.network.HermesApiClient(prefs, httpClient) },
                     onBack = { currentScreen = Screen.Menu }
                 )

@@ -20,6 +20,7 @@ data class MobileSession(
     val model: String?,
     val updatedAt: Long?,
     val messageCount: Int?,
+    val projectId: String? = null,
 )
 
 enum class ChatBlockType { TEXT, THINKING, TOOL_USE, TOOL_RESULT, IMAGE }
@@ -62,6 +63,16 @@ data class ModelInfo(
     val provider: String,
 )
 
+data class ProfileInfo(
+    val name: String,
+    val model: String?,
+    val provider: String?,
+    val isActive: Boolean,
+    val isDefault: Boolean,
+    val skillCount: Int,
+    val gatewayRunning: Boolean,
+)
+
 data class MemoryData(
     val memory: String,
     val user: String,
@@ -93,3 +104,35 @@ data class InsightsData(
     val totalCost: Double,
     val models: List<ModelStats>,
 )
+
+data class ProjectInfo(
+    val projectId: String,
+    val name: String,
+    val color: String?,
+)
+
+// ── Cron jobs ("Tasks") ─────────────────────────────────────────────────
+enum class CronJobStatus { ACTIVE, PAUSED, OFF, ERROR, NEEDS_ATTENTION }
+
+data class CronJob(
+    val id: String,
+    val name: String?,
+    val scheduleDisplay: String?,
+    val enabled: Boolean,
+    val state: String?,
+    val nextRunAt: Long?,
+    val lastRunAt: Long?,
+    val lastStatus: String?,
+    val lastError: String?,
+    val prompt: String?,
+) {
+    // Портирована логика из static/panels.js (_cronStatusMeta) — держим статус
+    // в одном месте, чтобы веб и мобильный клиент показывали одинаковый смысл.
+    val status: CronJobStatus
+        get() = when {
+            state == "paused" -> CronJobStatus.PAUSED
+            !enabled -> CronJobStatus.OFF
+            lastStatus == "error" -> CronJobStatus.ERROR
+            else -> CronJobStatus.ACTIVE
+        }
+}

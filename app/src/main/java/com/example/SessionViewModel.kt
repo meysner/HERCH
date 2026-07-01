@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.toMutableStateList
 import androidx.lifecycle.ViewModel
@@ -15,6 +16,7 @@ import com.example.data.ChatBlockType
 import com.example.data.ChatMessageItem
 import com.example.data.MobileSession
 import com.example.data.ModelInfo
+import com.example.data.ProfileInfo
 import com.example.data.NewSessionResult
 import com.example.data.SessionsResult
 import com.example.domain.StreamEventHandler
@@ -22,12 +24,24 @@ import com.example.network.HermesApiClient
 import com.example.ui.components.ReasoningLevel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.json.JSONObject
 
 private fun List<ChatMessageItem>.withStableIds(sessionId: String): List<ChatMessageItem> =
     mapIndexed { index, msg -> msg.copy(id = "$sessionId:$index") }
+
+private fun findModelById(models: List<ModelInfo>, modelId: String?): ModelInfo? {
+    val wanted = modelId?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    return models.firstOrNull { model ->
+        model.id == wanted ||
+            model.id.substringAfterLast(':') == wanted ||
+            model.id.substringAfter('@').substringAfter(':') == wanted
+    }
+}
 
 data class SessionInflightState(
     val blocks: SnapshotStateList<ChatBlock>,
@@ -54,6 +68,25 @@ class SessionViewModel(
         private set
     var isCreatingSession by mutableStateOf(false)
         private set
+
+    val profilesExpanded = mutableStateOf(prefs.getBoolean("profiles_expanded", true))
+    val projectsExpanded = mutableStateOf(prefs.getBoolean("projects_expanded", false))
+
+    // ── Проекты (фильтр списка сессий, по аналогии с веб-версией) ─────────
+    var projects by mutableStateOf<List<com.example.data.ProjectInfo>>(emptyList())
+        private set
+    var projectsLoading by mutableStateOf(false)
+        private set
+    // null = показывать все сессии; иначе — project_id, по которому фильтруем
+    var activeProjectFilter by mutableStateOf<String?>(null)
+        private set
+
+    val filteredSessions: List<MobileSession>
+        get() = activeProjectFilter?.let { pid -> sessions.filter { it.projectId == pid } } ?: sessions
+
+    fun selectProjectFilter(projectId: String?) {
+        activeProjectFilter = projectId
+    }
 
     // ── Активная сессия ────────────────────────────────────────────────────
     var selectedSession by mutableStateOf<MobileSession?>(null)
@@ -87,6 +120,8 @@ class SessionViewModel(
 
     // ── Черновики ─────────────────────────────────────────────────────────
     private val composerDrafts = mutableMapOf<String, String>()
+    // Сохранённый уровень reasoning per-session (как composerDrafts для текста)
+    private val reasoningLevelMap = mutableMapOf<String, ReasoningLevel>()
 
     // ── Модели / воркспейсы ───────────────────────────────────────────────
     var availableModels by mutableStateOf<List<ModelInfo>>(emptyList())
@@ -100,11 +135,50 @@ class SessionViewModel(
     var workspaceVersion by mutableStateOf(0)
         private set
 
+    // ── Профили ───────────────────────────────────────────────────────────
+    var profiles by mutableStateOf<List<ProfileInfo>>(emptyList())
+        private set
+    var activeProfileName by mutableStateOf("default")
+        private set
+    var profilesLoading by mutableStateOf(false)
+        private set
+
+    // ── Reasoning (поддержка зависит от модели) ───────────────────────────
+    // true по умолчанию: показываем кнопку до первого ответа сервера,
+    // чтобы не «моргать» при загрузке. false — явно не поддерживается.
+    var supportsReasoning by mutableStateOf(true)
+        private set
+    var supportedReasoningEfforts by mutableStateOf<List<String>>(emptyList())
+        private set
+
     private var pollJob: Job? = null
+
+    // Сигнал "приложение сейчас на переднем плане", выставляется из
+    // MainActivity.onStart()/onStop() (единственная Activity в приложении).
+    // Пока false — цикл поллинга в startPolling() не делает сетевых запросов,
+    // а спит на isForeground.first { it }, не потребляя ни сеть, ни CPU и не
+    // мешая устройству уйти в Doze.
+    private val _isForeground = MutableStateFlow(true)
+    val isForeground: StateFlow<Boolean> = _isForeground
+
+    fun setForeground(foreground: Boolean) {
+        _isForeground.value = foreground
+    }
 
     init {
         refreshSessions()
+        loadProfiles()
+        loadProjects()
         startPolling()
+
+        viewModelScope.launch {
+            snapshotFlow { profilesExpanded.value }
+                .collect { prefs.edit().putBoolean("profiles_expanded", it).apply() }
+        }
+        viewModelScope.launch {
+            snapshotFlow { projectsExpanded.value }
+                .collect { prefs.edit().putBoolean("projects_expanded", it).apply() }
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -212,10 +286,8 @@ class SessionViewModel(
         viewModelScope.launch {
             if (availableModels.isEmpty()) availableModels = _apiClient.getModels()
             if (availableWorkspaces.isEmpty()) availableWorkspaces = _apiClient.getWorkspaces()
-            if (currentModel == null) {
-                currentModel = session.model?.let { m -> availableModels.find { it.id == m } }
-                    ?: availableModels.firstOrNull()
-            }
+            currentModel = findModelById(availableModels, session.model) ?: currentModel ?: availableModels.firstOrNull()
+            fetchReasoningStatus(currentModel)
         }
     }
 
@@ -270,6 +342,77 @@ class SessionViewModel(
         },
     )
 
+    fun loadProfiles() {
+        if (profilesLoading) return
+        viewModelScope.launch {
+            profilesLoading = true
+            val (list, active) = _apiClient.getProfiles()
+            profiles = list
+            activeProfileName = active
+            profilesLoading = false
+        }
+    }
+
+    fun loadProjects() {
+        if (projectsLoading) return
+        viewModelScope.launch {
+            projectsLoading = true
+            val list = _apiClient.getProjects()
+            projects = list
+            // Если активный фильтр указывал на проект, которого больше нет — сбрасываем.
+            if (activeProjectFilter != null && list.none { it.projectId == activeProjectFilter }) {
+                activeProjectFilter = null
+            }
+            projectsLoading = false
+        }
+    }
+
+    fun switchProfile(name: String, onDone: () -> Unit = {}) {
+        viewModelScope.launch {
+            _apiClient.switchProfile(name)
+            // После переключения: обновляем профили, проекты (они per-profile), сессии и модели
+            loadProfiles()
+            activeProjectFilter = null
+            loadProjects()
+            refreshSessions()
+            val freshModels = _apiClient.getModels()
+            availableModels = freshModels
+            currentModel = findModelById(freshModels, selectedSession?.model) ?: freshModels.firstOrNull()
+            fetchReasoningStatus(currentModel)
+            onDone()
+        }
+    }
+
+    /**
+     * Запрашивает у сервера поддержку reasoning для текущей модели.
+     * Зеркало логики веб-фронтенда (fetchReasoningChip).
+     * Вызывается при выборе модели и при выборе сессии.
+     */
+    // true пока идёт запрос fetchReasoningStatus — UI скрывает кнопку
+    var reasoningStatusLoading by mutableStateOf(false)
+        private set
+
+    fun fetchReasoningStatus(model: ModelInfo? = currentModel) {
+        viewModelScope.launch {
+            // Сбрасываем список до ответа сервера: пока грузим — скрываем кнопку
+            // (не показываем карусель из 4 уровней для модели, у которой может
+            // быть 0 или 1 уровень, и не разрешаем клик с устаревшим уровнем).
+            reasoningStatusLoading = true
+            supportedReasoningEfforts = emptyList()
+
+            val status = _apiClient.getReasoningStatus(model?.id, model?.provider)
+            if (status != null) {
+                supportsReasoning = status.first
+                supportedReasoningEfforts = status.second
+            } else {
+                // Ошибка сети — fail-open: показываем кнопку, но без списка уровней
+                // (fallback на полную карусель лучше, чем скрыть функцию совсем)
+                supportsReasoning = true
+            }
+            reasoningStatusLoading = false
+        }
+    }
+
     fun sendMessage(
         text: String,
         attachments: List<JSONObject> = emptyList(),
@@ -283,16 +426,29 @@ class SessionViewModel(
         val userMsg = ChatMessageItem("user", listOf(ChatBlock(ChatBlockType.TEXT, text)), id = "$sid:$userIdx")
         val baseMessages = messages + userMsg
 
-        messages = baseMessages + ChatMessageItem("assistant", streamingBlocks, id = "$sid:${userIdx + 1}")
-        inflightSessions[sid] = SessionInflightState(
-            blocks = streamingBlocks,
-            baseMessages = baseMessages,
-        )
-
         val handler = buildHandler(sid, streamingBlocks, baseMessages)
 
         viewModelScope.launch {
-            if (reasoningLevel != ReasoningLevel.NONE) _apiClient.setReasoningEffort(reasoningLevel)
+            // Синхронизируем effort ДО показа UI-заглушки — если не удалось
+            // установить уровень, стриминг не запускаем вовсе. Retry внутри
+            // setReasoningEffort (3 попытки с backoff), поэтому здесь просто
+            // проверяем результат.
+            val effortResult = _apiClient.setReasoningEffort(reasoningLevel)
+            if (effortResult.isFailure) {
+                handler.onError(
+                    "Не удалось установить уровень рассуждения: ${effortResult.exceptionOrNull()?.message}"
+                )
+                return@launch
+            }
+
+            // Показываем UI-заглушку только после успешного setReasoningEffort,
+            // чтобы не оставлять «висячий» ассистентский пузырь при ошибке.
+            messages = baseMessages + ChatMessageItem("assistant", streamingBlocks, id = "$sid:${userIdx + 1}")
+            inflightSessions[sid] = SessionInflightState(
+                blocks = streamingBlocks,
+                baseMessages = baseMessages,
+            )
+
             try {
                 _apiClient.sendAndStream(
                     sessionId = sid,
@@ -300,7 +456,6 @@ class SessionViewModel(
                     model = currentModel?.id,
                     workspace = currentWorkspace,
                     attachments = attachments,
-                    reasoningLevel = reasoningLevel,
                     onStreamStarted = { handler.onStreamStarted(it) },
                     onToken      = { handler.onToken(it) },
                     onReasoning  = { handler.onReasoning(it) },
@@ -377,6 +532,12 @@ class SessionViewModel(
     fun saveDraft(sessionId: String, text: String) { composerDrafts[sessionId] = text }
     fun getDraft(sessionId: String): String = composerDrafts[sessionId] ?: ""
 
+    fun saveReasoningLevel(sessionId: String, level: ReasoningLevel) {
+        reasoningLevelMap[sessionId] = level
+    }
+    fun getReasoningLevel(sessionId: String): ReasoningLevel =
+        reasoningLevelMap[sessionId] ?: ReasoningLevel.NONE
+
     // ─────────────────────────────────────────────────────────────────────
     // Модель и воркспейс
     // ─────────────────────────────────────────────────────────────────────
@@ -385,6 +546,8 @@ class SessionViewModel(
         val oldModel = currentModel
         val oldSessionModel = selectedSession?.model
         currentModel = model
+        // Сразу обновляем состояние reasoning для новой модели (как веб делает при смене модели)
+        fetchReasoningStatus(model)
         selectedSession?.sessionId?.let { sid ->
             selectedSession = selectedSession?.copy(model = model.id)
             viewModelScope.launch {
@@ -396,6 +559,28 @@ class SessionViewModel(
                     currentModel = oldModel
                     selectedSession = selectedSession?.copy(model = oldSessionModel)
                     println("Failed to update session model: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun resetModel() {
+        val oldModel = currentModel
+        val oldSessionModel = selectedSession?.model
+        currentModel = availableModels.firstOrNull()
+        fetchReasoningStatus(null)
+        selectedSession?.sessionId?.let { sid ->
+            selectedSession = selectedSession?.copy(model = null)
+            viewModelScope.launch {
+                try {
+                    // Передаём пустую строку — сервер интерпретирует как "дефолт из конфига"
+                    val updatedSession = _apiClient.updateSessionModel(sid, "", null)
+                    selectedSession = updatedSession
+                    currentModel = findModelById(availableModels, updatedSession.model) ?: availableModels.firstOrNull()
+                    workspaceVersion++
+                } catch (e: Exception) {
+                    currentModel = oldModel
+                    selectedSession = selectedSession?.copy(model = oldSessionModel)
                 }
             }
         }
@@ -429,7 +614,12 @@ class SessionViewModel(
         pollJob?.cancel()
         pollJob = viewModelScope.launch {
             while (true) {
-                delay(3_000L)
+                // Пока приложение в фоне -- не делаем сетевых запросов вообще,
+                // просто спим на флаге до возврата на передний план. Как только
+                // isForeground снова true, сразу опрашиваем (без ожидания
+                // оставшихся секунд таймера), чтобы список сессий и бейджи
+                // непрочитанного обновились мгновенно при возврате в приложение.
+                _isForeground.first { it }
                 runCatching {
                     when (val result = _apiClient.listSessions()) {
                         is SessionsResult.Success -> {
@@ -482,6 +672,7 @@ class SessionViewModel(
                         is SessionsResult.Failure -> {}
                     }
                 }
+                delay(3_000L)
             }
         }
     }
