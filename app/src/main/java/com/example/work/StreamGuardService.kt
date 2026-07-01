@@ -114,16 +114,22 @@ class StreamGuardService : Service() {
     }
 
     private fun updateRunningNotification(snapshot: List<com.example.di.SessionWorkItem>) {
-        val streaming = snapshot.count { it.isStreaming }
-        val text = when {
-            streaming == 0 -> "Ожидание действия"
-            streaming == 1 -> (snapshot.firstOrNull { it.isStreaming }?.title?.ifBlank { null } ?: "Сессия") + " выполняется…"
-            else -> "$streaming сессии выполняются…"
+        val streamingItems = snapshot.filter { it.isStreaming }
+        val text = when (streamingItems.size) {
+            0 -> "Ожидание действия"
+            1 -> (streamingItems.first().title.ifBlank { null } ?: "Сессия") + " выполняется…"
+            else -> "${streamingItems.size} сессии выполняются…"
         }
+        // Если стримится ровно одна сессия — ведём прямо в её чат, а не на
+        // экран задач: раньше тап по уведомлению всегда открывал Tasks, даже
+        // когда текст уведомления уже называл конкретную сессию по имени.
+        val pendingIntent = streamingItems.singleOrNull()?.let {
+            NotificationHelper.openSessionIntent(this, it.sessionId)
+        } ?: NotificationHelper.openTasksIntent(this)
         val notification = NotificationHelper.buildRunningNotification(
             this,
             contentText = text,
-            pendingIntent = NotificationHelper.openTasksIntent(this),
+            pendingIntent = pendingIntent,
         )
         ContextCompat.getSystemService(this, android.app.NotificationManager::class.java)
             ?.notify(NotificationHelper.STREAM_GUARD_NOTIFICATION_ID, notification)
