@@ -44,8 +44,19 @@ object SessionStreamRepository {
     // JSONObject? как значение — тот же контракт, что был в приватных полях
     // SessionViewModel: null означает "запись есть, но approval/clarify сейчас
     // не активен" (используется в паре мест как временное состояние).
-    val pendingApprovals = mutableMapOf<String, JSONObject?>()
-    val pendingClarifies = mutableMapOf<String, JSONObject?>()
+    //
+    // ВАЖНО: mutableMapOf() здесь был race condition — StreamGuardService читает
+    // эти карты из Dispatchers.Default корутины в snapshot() каждые 4 секунды,
+    // а SessionViewModel пишет в них с главного потока. Обычный LinkedHashMap не
+    // потокобезопасен для конкурентного чтения/записи (в лучшем случае получим
+    // ConcurrentModificationException при итерации в pendingApprovals.values.any {},
+    // в худшем — тихую порчу внутренней структуры map). inflightSessions уже был
+    // mutableStateMapOf (SnapshotStateMap) — это же потокобезопасное поведение
+    // нужно этим двум картам: SnapshotStateMap безопасен для конкурентного
+    // доступа из разных потоков (в отличие от Compose recomposition, которая
+    // требует главного потока — сам доступ к данным потокобезопасен всегда).
+    val pendingApprovals = mutableStateMapOf<String, JSONObject?>()
+    val pendingClarifies = mutableStateMapOf<String, JSONObject?>()
 
     /** Есть ли вообще что охранять фоновым сервисом — активный стрим или запрос на действие. */
     val hasActiveWork: Boolean

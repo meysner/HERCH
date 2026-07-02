@@ -122,6 +122,9 @@ private enum class WaveState { IDLE, INTRO, FLOW, OUTRO }
 private const val TRANSITION_MS = 900f
 private const val SWEEP_DURATION_MS = 1600
 
+// Длительность zipper-перехода между эффектами внутри FLOW (см. html: TRANS_DURATION = 800)
+private const val TRANS_DURATION_MS = 800f
+
 private fun stateToEffect(state: HerchLogoState): LogoEffect = when (state) {
     HerchLogoState.LOADING   -> LogoEffect.SINE
     HerchLogoState.WAITING   -> LogoEffect.DNA2
@@ -206,6 +209,20 @@ private fun computeTarget(
     }
 }
 
+private fun clamp01(v: Float): Float = min(max(v, 0f), 1f)
+private fun smoothstepClamped(t: Float): Float {
+    val c = clamp01(t)
+    return c * c * (3f - 2f * c)
+}
+
+// Аналог computeLocalT(mode, transT, col, p) из html-прототипа — но только для режима
+// 'split' (Zipper): верхняя и нижняя пряди буквы переключаются со сдвигом по времени,
+// как будто расходятся/сходятся застёжкой.
+private fun computeLocalT(transT: Float, pt: ColPoint): Float {
+    val stagger = if (pt.strand == 1) 0f else 0.28f
+    return smoothstepClamped(transT * 1.4f - stagger)
+}
+
 @Composable
 fun HerchLogo(
     modifier: Modifier = Modifier,
@@ -224,6 +241,12 @@ fun HerchLogo(
     var flowStartSec       by remember { mutableFloatStateOf(0f) }
     var pendingStop        by remember { mutableStateOf(false) }
     var currentEffect      by remember { mutableStateOf(LogoEffect.SINE) }
+
+    // ── Zipper-переход между эффектами (аналог isTransitioning/fromEffect/toEffect из html) ──
+    var isTransitioning by remember { mutableStateOf(false) }
+    var fromEffect       by remember { mutableStateOf<LogoEffect?>(null) }
+    var toEffect         by remember { mutableStateOf<LogoEffect?>(null) }
+    var transStartSec    by remember { mutableFloatStateOf(0f) }
 
     // Состояния для управления бликом
     val sweepProgress = remember { Animatable(1f) } // 1f означает, что блик завершен и скрыт
@@ -277,16 +300,36 @@ fun HerchLogo(
 
     LaunchedEffect(state) {
         val nowSec = rawTime * 60f
+        val newEffect = stateToEffect(state)
         val shouldAnimate = state != HerchLogoState.IDLE
         if (shouldAnimate) {
-            currentEffect = stateToEffect(state)
             pendingStop = false
-            if (waveState == WaveState.IDLE || waveState == WaveState.OUTRO) {
-                waveState          = WaveState.INTRO
-                transitionStartSec = nowSec
+            when (waveState) {
+                WaveState.IDLE, WaveState.OUTRO -> {
+                    // Старт "с нуля" — как раньше, через INTRO, без zipper-перехода.
+                    currentEffect       = newEffect
+                    waveState           = WaveState.INTRO
+                    transitionStartSec  = nowSec
+                    isTransitioning     = false
+                    fromEffect          = null
+                    toEffect            = null
+                }
+                WaveState.FLOW -> {
+                    // Уже в FLOW и эффект реально меняется — запускаем zipper-переход
+                    // (аналог html: fromEffect = currentEffect; toEffect = effect; isTransitioning = true).
+                    if (newEffect != currentEffect) {
+                        fromEffect      = currentEffect
+                        toEffect        = newEffect
+                        currentEffect   = newEffect
+                        isTransitioning = true
+                        transStartSec   = nowSec
+                    }
+                }
+                WaveState.INTRO -> {
+                    // Ещё не доехали до FLOW — просто меняем целевой эффект без zipper'а.
+                    currentEffect = newEffect
+                }
             }
-            // Если уже в FLOW — currentEffect подменяется на лету, без пере-INTRO,
-            // а цвет плавно доезжает через animateColorAsState.
         } else {
             pendingStop = true
         }
@@ -295,6 +338,14 @@ fun HerchLogo(
     LaunchedEffect(rawTime) {
         val nowSec    = rawTime * 60f
         val elapsedMs = (nowSec - transitionStartSec) * 1000f
+
+        if (isTransitioning) {
+            val transElapsedMs = (nowSec - transStartSec) * 1000f
+            if (transElapsedMs >= TRANS_DURATION_MS) {
+                isTransitioning = false
+                fromEffect      = null
+            }
+        }
 
         when (waveState) {
             WaveState.INTRO -> {
@@ -377,7 +428,23 @@ fun HerchLogo(
                         gridIntensities[origIdx] = max(gridIntensities[origIdx], 1f)
                     }
                 } else {
-                    val target = computeTarget(currentEffect, col, pt, envelope, wp, timeMs)
+                    val target: Target
+                    if (isTransitioning && fromEffect != null && toEffect != null) {
+                        val transElapsedMs = (timeSec - transStartSec) * 1000f
+                        val transT = (transElapsedMs / TRANS_DURATION_MS).coerceIn(0f, 1f)
+
+                        val fromT = computeTarget(fromEffect!!, col, pt, envelope, wp, timeMs)
+                        val toT   = computeTarget(toEffect!!, col, pt, envelope, wp, timeMs)
+                        val localT = computeLocalT(transT, pt)
+
+                        target = Target(
+                            y         = fromT.y * (1f - localT) + toT.y * localT,
+                            thickness = fromT.thickness * (1f - localT) + toT.thickness * localT,
+                            intensity = fromT.intensity * (1f - localT) + toT.intensity * localT,
+                        )
+                    } else {
+                        target = computeTarget(currentEffect, col, pt, envelope, wp, timeMs)
+                    }
 
                     val currentThickness = 0.5f + (target.thickness - 0.5f) * lerpFactor
                     val yInterp          = pt.origRow + (target.y - pt.origRow) * lerpFactor

@@ -17,6 +17,8 @@ import com.example.data.WorkspaceEntry
 import com.example.ui.components.ReasoningLevel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -451,6 +453,16 @@ class HermesApiClient(
                 .header("Accept", "text/event-stream")
                 .build()
 
+            // Один scope на всё соединение (не на каждое событие!), привязанный
+            // к жизни continuation. Раньше onEvent создавал новый несвязанный
+            // CoroutineScope(Dispatchers.Main) на КАЖДОЕ SSE-событие — эти launch
+            // не отменялись вместе с connectOnce/родительской корутиной. Если
+            // пользователь отменял стрим (cancel/навигация назад), уже запущенные
+            // launch всё равно продолжали выполняться и трогать blocks/callbacks
+            // "мёртвого" хендлера. Теперь scope создаётся один раз здесь и
+            // отменяется в invokeOnCancellation вместе с eventSource.cancel().
+            val listenerScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
             val listener = object : EventSourceListener() {
                 override fun onEvent(eventSource: EventSource, id: String?, type: String?, data: String) {
                     if (!id.isNullOrBlank()) {
@@ -465,7 +477,7 @@ class HermesApiClient(
 
                     val json = runCatching { JSONObject(data) }.getOrNull() ?: return
 
-                    kotlinx.coroutines.CoroutineScope(Dispatchers.Main).launch {
+                    listenerScope.launch {
                         when (eventType) {
                             "token" -> json.optString("text").takeIf { it.isNotBlank() }?.let { onToken(it) }
                             "reasoning" -> json.optString("text").takeIf { it.isNotBlank() }?.let { onReasoning(it) }
@@ -487,10 +499,15 @@ class HermesApiClient(
                 }
 
                 override fun onClosed(eventSource: EventSource) {
+                    // Штатное завершение — invokeOnCancellation здесь НЕ сработает
+                    // (это не отмена, а нормальный resume), поэтому listenerScope
+                    // нужно закрыть явно, иначе SupervisorJob просто утечёт.
+                    listenerScope.cancel()
                     if (continuation.isActive) continuation.resume(null)
                 }
 
                 override fun onFailure(eventSource: EventSource, t: Throwable?, response: okhttp3.Response?) {
+                    listenerScope.cancel()
                     if (continuation.isActive) {
                         continuation.resume(t?.message ?: "Stream connection lost")
                     }
@@ -498,7 +515,10 @@ class HermesApiClient(
             }
 
             val eventSource = factory.newEventSource(sseRequest, listener)
-            continuation.invokeOnCancellation { eventSource.cancel() }
+            continuation.invokeOnCancellation {
+                eventSource.cancel()
+                listenerScope.cancel()
+            }
         }
 
         val liveUrl = "$baseUrl/api/chat/stream?stream_id=$streamId"

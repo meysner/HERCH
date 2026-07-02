@@ -162,8 +162,8 @@ fun AppMenuScreen(
             }
 
             item { DrawerMenuItem(icon = Icons.Outlined.Psychology, text = "Memory", onClick = onNavigateToMemory) }
-            item { DrawerMenuItem(icon = Icons.Outlined.BarChart, text = "Stats", onClick = onNavigateToStats) }
-            item { DrawerMenuItem(icon = Icons.Outlined.EventNote, text = "Tasks", onClick = onNavigateToTasks) }
+            item { DrawerMenuItem(icon = Icons.Outlined.Insights, text = "Stats", onClick = onNavigateToStats) }
+            item { DrawerMenuItem(icon = Icons.Outlined.Assignment, text = "Tasks", onClick = onNavigateToTasks) }
 
             // ── Profile section ───────────────────────────────────────────
             item {
@@ -177,7 +177,7 @@ fun AppMenuScreen(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
                         .clickable { profilesExpanded = !profilesExpanded }
-                        .padding(vertical = 14.dp, horizontal = 4.dp),
+                        .padding(vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
@@ -284,7 +284,7 @@ fun AppMenuScreen(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
                         .clickable { projectsExpanded = !projectsExpanded }
-                        .padding(vertical = 14.dp, horizontal = 4.dp),
+                        .padding(vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
@@ -389,7 +389,7 @@ fun AppMenuScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 16.dp, bottom = 16.dp),
+                        .padding(top = 40.dp, bottom = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -420,7 +420,7 @@ fun AppMenuScreen(
                 }
             }
 
-            items(sessions, key = { it.sessionId }) { session ->
+            items(sessions, key = { it.sessionId }, contentType = { "session" }) { session ->
                 val isActive = viewModel.inflightSessions.containsKey(session.sessionId)
                 val isUnread = viewModel.unreadSessions[session.sessionId] == true
                 // attention приходит прямо в /api/sessions (см. HermesApiClient.toSessionAttention) —
@@ -430,8 +430,20 @@ fun AppMenuScreen(
                 val needsAttention = session.attention != null
                 val otherSessionStreaming = viewModel.inflightSessions.isNotEmpty() && !isActive
 
-                val pulseAlpha by rememberInfiniteTransition(label = "pulse_${session.sessionId}")
-                    .animateFloat(
+                // sessionMeta/formatSessionTime строят строки (split/join) — раньше
+                // пересчитывались на каждой рекомпозиции строки (в т.ч. просто при
+                // скролле, когда меняются inflight/unread карты у других сессий).
+                // remember(session) пересчитывает только когда сама сессия изменилась.
+                val metaText = remember(session) { sessionMeta(session) }
+                val timeText = remember(session) { formatSessionTime(session.updatedAt) }
+
+                // Бесконечная анимация создаётся только для активной сессии —
+                // раньше она запускалась для каждой строки списка (даже неактивной),
+                // что при большом числе сессий вызывало постоянный recomposition
+                // всех видимых строк и лаги в меню.
+                val pulseAlpha = if (isActive) {
+                    val pulseTransition = rememberInfiniteTransition(label = "pulse_${session.sessionId}")
+                    val animatedAlpha by pulseTransition.animateFloat(
                         initialValue = 1f,
                         targetValue = 0.25f,
                         animationSpec = infiniteRepeatable(
@@ -440,6 +452,10 @@ fun AppMenuScreen(
                         ),
                         label = "alpha"
                     )
+                    animatedAlpha
+                } else {
+                    1f
+                }
 
                 Column(
                     modifier = Modifier
@@ -498,7 +514,7 @@ fun AppMenuScreen(
                             fontWeight = if (needsAttention || isActive || isUnread) FontWeight.SemiBold else FontWeight.Medium
                         )
                         Text(
-                            text = formatSessionTime(session.updatedAt),
+                            text = timeText,
                             color = if (needsAttention) Color(0xFFFFA726) else if (isActive || isUnread) Color(0xFFFFD700) else Color(0xFF888888),
                             fontSize = 13.sp,
                             modifier = Modifier.padding(start = 16.dp)
@@ -513,7 +529,7 @@ fun AppMenuScreen(
                             }
                             isActive -> "Request in progress..."
                             isUnread -> "New message"
-                            else -> sessionMeta(session)
+                            else -> metaText
                         },
                         color = if (needsAttention) Color(0xFFFFA726).copy(alpha = 0.9f) else if (isActive || isUnread) Color(0xFFFFD700).copy(alpha = 0.75f) else Color(0xFF888888),
                         fontSize = 13.sp,

@@ -708,7 +708,17 @@ class SessionViewModel(
                             }
                             editor.apply()
 
-                            sessions = incomingSessions
+                            // sessions — обычный mutableStateOf(List<...>), без fine-grained
+                            // диффа по элементам (в отличие от inflightSessions/unreadSessions,
+                            // которые уже mutableStateMapOf). Каждый JSON-парсинг создаёт новый
+                            // List<MobileSession>, и раньше он писался в state безусловно —
+                            // каждые 3 секунды это форсило рекомпозицию ВСЕХ видимых строк в
+                            // MenuScreen, даже если данные не менялись. Если это совпадало со
+                            // скроллом — как раз и был тот лаг. Пишем в state только когда
+                            // список реально отличается.
+                            if (sessions != incomingSessions) {
+                                sessions = incomingSessions
+                            }
                             selectedSession?.sessionId?.let { sid ->
                                 incomingSessions.find { it.sessionId == sid }
                                     ?.let { selectedSession = it }

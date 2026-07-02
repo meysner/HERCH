@@ -201,8 +201,23 @@ fun WorkspaceBrowserSheet(
 
     LaunchedEffect(workspaceVersion) { loadDir(".") }
 
+    // skipPartiallyExpanded — шторка сразу открывается на весь экран, а не в
+    // промежуточном "peek"-состоянии. Иначе Column(fillMaxSize()) меряется по
+    // высоте промежуточного состояния, и пустой стейт/лоадер оказываются
+    // по центру этого маленького окна, а не всего экрана (как на скриншоте).
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    // Крестик раньше вызывал onDismiss() напрямую — это сразу убирало composable
+    // из дерева, минуя анимацию сворачивания ModalBottomSheet (она запускается
+    // только через sheetState.hide()). Свайп-вниз и системный "назад" уже
+    // проигрывают анимацию сами, а вот программный dismiss через кнопку — нет.
+    fun animatedDismiss() {
+        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+    }
+
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = ::animatedDismiss,
+        sheetState = sheetState,
         containerColor = Color(0xFF1E1E1E),
         dragHandle = null
     ) {
@@ -240,7 +255,7 @@ fun WorkspaceBrowserSheet(
                     Icon(Icons.Outlined.Refresh, contentDescription = "Refresh", tint = Color.White)
                 }
 
-                IconButton(onClick = onDismiss) {
+                IconButton(onClick = { animatedDismiss() }) {
                     Icon(Icons.Outlined.Close, contentDescription = "Close", tint = Color.White)
                 }
             }
@@ -283,7 +298,7 @@ fun WorkspaceBrowserSheet(
 
             HorizontalDivider(color = Color(0xFF2C2C2C))
 
-            Box(modifier = Modifier.weight(1f)) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     isLoading -> {
                         CircularProgressIndicator(
@@ -300,12 +315,32 @@ fun WorkspaceBrowserSheet(
                         )
                     }
                     entries.isEmpty() -> {
-                        Text(
-                            text = "Empty directory",
-                            color = Color(0xFF888888),
-                            fontSize = 15.sp,
-                            modifier = Modifier.align(Alignment.Center)
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.Center)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.FolderOpen,
+                                contentDescription = null,
+                                tint = Color(0xFF444444),
+                                modifier = Modifier.size(56.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "Empty directory",
+                                color = Color(0xFF888888),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Files will appear here",
+                                color = Color(0xFF555555),
+                                fontSize = 13.sp
+                            )
+                        }
                     }
                     else -> {
                         LazyColumn(
