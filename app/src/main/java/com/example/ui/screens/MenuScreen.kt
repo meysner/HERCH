@@ -92,6 +92,8 @@ fun AppMenuScreen(
     val isCreating = viewModel.isCreatingSession
     val errorMessage = viewModel.sessionsError
     val hasInflight = viewModel.inflightSessions.isNotEmpty()
+    val isOffline = viewModel.isOffline
+    val retryTick = viewModel.retryTick
 
     var profilesExpanded by viewModel.profilesExpanded
     var projectsExpanded by viewModel.projectsExpanded
@@ -142,10 +144,12 @@ fun AppMenuScreen(
                     HerchLogo(
                         modifier = Modifier.width(180.dp).height(50.dp),
                         state = when {
+                            isOffline   -> HerchLogoState.OFFLINE
                             hasInflight -> HerchLogoState.REASONING
                             isLoading   -> HerchLogoState.LOADING
                             else        -> HerchLogoState.IDLE
                         },
+                        retryTick = retryTick,
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onLogout) {

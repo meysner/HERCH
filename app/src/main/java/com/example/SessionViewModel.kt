@@ -65,6 +65,16 @@ class SessionViewModel(
     var isCreatingSession by mutableStateOf(false)
         private set
 
+    // ── Индикатор офлайна для HerchLogo (красная волна → ERROR) ────────────
+    // isOffline: последняя попытка получить список сессий провалилась.
+    // retryTick: инкрементируется на каждую провальную попытку — по нему
+    // HerchLogo заново запускает цикл "красная волна → ERROR" на каждый ретрай
+    // (сам ретрай происходит раз в 3 секунды внутри startPolling()).
+    var isOffline by mutableStateOf(false)
+        private set
+    var retryTick by mutableStateOf(0)
+        private set
+
     val profilesExpanded = mutableStateOf(prefs.getBoolean("profiles_expanded", true))
     val projectsExpanded = mutableStateOf(prefs.getBoolean("projects_expanded", false))
 
@@ -193,12 +203,15 @@ class SessionViewModel(
             sessionsError = ""
             when (val result = _apiClient.listSessions()) {
                 is SessionsResult.Success -> {
+                    isOffline = false
                     sessions = result.sessions
                     selectedSession?.sessionId?.let { sid ->
                         result.sessions.find { it.sessionId == sid }?.let { selectedSession = it }
                     }
                 }
                 is SessionsResult.Failure -> {
+                    isOffline = true
+                    retryTick++
                     if (cached == null) sessionsError = result.message
                 }
             }
@@ -668,6 +681,7 @@ class SessionViewModel(
                 runCatching {
                     when (val result = _apiClient.listSessions()) {
                         is SessionsResult.Success -> {
+                            isOffline = false
                             val incomingSessions = result.sessions
                             val now = System.currentTimeMillis()
                             val editor = prefs.edit()
@@ -724,8 +738,16 @@ class SessionViewModel(
                                     ?.let { selectedSession = it }
                             }
                         }
-                        is SessionsResult.Failure -> {}
+                        is SessionsResult.Failure -> {
+                            isOffline = true
+                            retryTick++
+                        }
                     }
+                }.onFailure {
+                    // Например, IOException при обрыве соединения — тоже считаем попыткой,
+                    // чтобы HerchLogo не "застрял" на предыдущем визуальном состоянии.
+                    isOffline = true
+                    retryTick++
                 }
                 delay(3_000L)
             }
