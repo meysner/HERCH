@@ -26,6 +26,8 @@ import com.example.data.ProfileInfo
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ApprovalBottomSheet(
+    description: String,
+    command: String,
     onRespond: (choice: String) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -55,12 +57,47 @@ fun ApprovalBottomSheet(
                 Text("Confirmation required", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             }
             Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                "The agent requests permission to perform a potentially dangerous action.",
-                color = Color(0xFFCCCCCC),
-                fontSize = 16.sp,
-                lineHeight = 22.sp
-            )
+            // Что именно разрешаем — раньше этот текст был статичным и не
+            // показывал ни description, ни command из pendingApproval, из-за
+            // чего пользователь жал "Allow" вслепую. Мимикрируем web-ui
+            // (approvalDesc + approvalCmd в static/messages.js).
+            if (description.isNotBlank()) {
+                Text(
+                    description,
+                    color = Color(0xFFCCCCCC),
+                    fontSize = 16.sp,
+                    lineHeight = 22.sp
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            if (command.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 160.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF111111))
+                        .verticalScroll(rememberScrollState())
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        command,
+                        color = Color(0xFFE0E0E0),
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                    )
+                }
+            } else if (description.isBlank()) {
+                // Ни описания, ни команды не пришло от сервера — не оставляем
+                // пользователя совсем без контекста.
+                Text(
+                    "The agent requests permission to perform a potentially dangerous action.",
+                    color = Color(0xFFCCCCCC),
+                    fontSize = 16.sp,
+                    lineHeight = 22.sp
+                )
+            }
             Spacer(modifier = Modifier.height(24.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(

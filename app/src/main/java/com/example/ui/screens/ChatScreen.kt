@@ -491,7 +491,28 @@ fun ChatScreen(
     }
 
     if (pendingApproval != null) {
+        // Те же поля, что рендерит web-ui в showApprovalCard()
+        // (static/messages.js): description + pattern_keys в скобках, и
+        // отдельно command. Раньше сюда ничего не передавалось, поэтому
+        // пользователь видел только общую фразу без сути запроса.
+        val approvalDescription = remember(pendingApproval) {
+            val desc = pendingApproval.optString("description")
+            val patternKeys = pendingApproval.optJSONArray("pattern_keys")
+            val keys = buildList {
+                if (patternKeys != null) {
+                    for (i in 0 until patternKeys.length()) {
+                        patternKeys.optString(i).takeIf { it.isNotBlank() }?.let { add(it) }
+                    }
+                } else {
+                    pendingApproval.optString("pattern_key").takeIf { it.isNotBlank() }?.let { add(it) }
+                }
+            }
+            if (keys.isNotEmpty()) "$desc [${keys.joinToString(", ")}]" else desc
+        }
+        val approvalCommand = remember(pendingApproval) { pendingApproval.optString("command") }
         ApprovalBottomSheet(
+            description = approvalDescription,
+            command = approvalCommand,
             onRespond = { choice -> viewModel.respondToApproval(choice) },
             onDismiss = { /* ViewModel обработает */ }
         )
